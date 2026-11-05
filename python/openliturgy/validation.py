@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Union
 from urllib.parse import unquote
@@ -22,7 +23,7 @@ LAYERS: list[Layer] = ["parse", "schema-selection", "structural", "consistency",
 
 
 def _report(
-    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: Optional[list[Layer]] = None
+    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: list[Layer] | None = None
 ) -> ValidationReport:
     diagnostics.sort(key=lambda item: (LAYERS.index(item.layer), item.source, item.jsonPointer, item.code))
     return ValidationReport(
@@ -35,7 +36,7 @@ def _report(
 
 
 def validate_document(
-    value: Union[str, Path, LoadedDocument], registry: Optional[SchemaRegistry] = None
+    value: str | Path | LoadedDocument, registry: SchemaRegistry | None = None
 ) -> ValidationReport:
     loaded = load_document(value) if isinstance(value, (str, Path)) else value
     diagnostics: list[Diagnostic] = []
@@ -975,7 +976,7 @@ def _integrity_diagnostics(
     return diagnostics
 
 
-def verify_package(root: Union[str, Path]) -> ValidationReport:
+def verify_package(root: str | Path) -> ValidationReport:
     """Integrity-only verification: every document, package-local asset, and the package itself must be pinned."""
     directory = Path(root).resolve()
     documents = load_package(directory)
@@ -997,7 +998,7 @@ def verify_package(root: Union[str, Path]) -> ValidationReport:
     return _report(diagnostics, [doc.source for doc in documents], [])
 
 
-def pack_package(root: Union[str, Path], write: bool = True) -> dict[str, Any]:
+def pack_package(root: str | Path, write: bool = True) -> dict[str, Any]:
     """Pin every package document in the manifest and recompute the package digest. Mirrors ``packPackage``."""
     directory = Path(root).resolve()
     manifest_path = directory / "manifest.ols.json"
@@ -1078,7 +1079,7 @@ def validate_translation_variants(data: dict[str, Any], source: str = "<inline>"
     return _validate_translation_variants(data, source)
 
 
-def run_self_tests(root: Union[str, Path]) -> ValidationReport:
+def run_self_tests(root: str | Path) -> ValidationReport:
     diagnostics: list[Diagnostic] = []
     directory = Path(root).resolve()
     for expected_valid, name in ((True, "valid"), (False, "invalid")):
