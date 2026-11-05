@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import jsonld from 'jsonld';
 import { loadContext } from '@openliturgy/schemas';
-import { approvalSignatureMessage, canonicalDigest, canonicalize, generateSigningKey, lockPackage, signApproval, signPackage, verifySignature, packPackage, versionSatisfies, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
+import { applyAtPointer, applyChanges, applyOverlay, ChangeError, diffPackages, mergePackages, migratePackage, packageDocuments, approvalSignatureMessage, canonicalDigest, canonicalize, generateSigningKey, lockPackage, signApproval, signPackage, verifySignature, packPackage, versionSatisfies, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), '../../../fixtures');
 
@@ -394,5 +394,87 @@ describe('signatures and approvals', () => {
     const approval = JSON.parse(await readFile(join(fixtures, 'signed/approvals/diocesan-review.ols.json'), 'utf8'));
     expect(verifySignature(approvalSignatureMessage(approval), manifest.signatures[0])).toBe(false);
     expect(verifySignature(approvalSignatureMessage(approval), approval.signatures[0])).toBe(true);
+  });
+});
+
+describe('change exchange', () => {
+  const changes = (name: string) => join(fixtures, 'changes', name);
+  const scratch = () => mkdtemp(join(tmpdir(), 'ols-changes-'));
+  const withoutDerived = (documents: Map<string, unknown>) => {
+    const manifest = { ...(documents.get('manifest.ols.json') as Record<string, unknown>) };
+    for (const key of ['digest', 'files', 'signatures']) delete manifest[key];
+    return Object.fromEntries([...documents].map(([path, document]) => [path, path === 'manifest.ols.json' ? manifest : document]));
+  };
+
+  it('follows RFC 6902 semantics for add, remove, replace, and test', () => {
+    const document = { a: [1, 2], b: { c: 'x' } };
+    applyAtPointer(document, 'add', '/a/-', 3);
+    applyAtPointer(document, 'add', '/a/0', 0);
+    applyAtPointer(document, 'remove', '/b/c');
+    applyAtPointer(document, 'replace', '/a/1', 9);
+    expect(document).toEqual({ a: [0, 9, 2, 3], b: {} });
+    expect(() => applyAtPointer(document, 'test', '/a/0', 1)).toThrow(ChangeError);
+    expect(() => applyAtPointer(document, 'replace', '/missing', 1)).toThrow(/does not exist/);
+  });
+
+  it('round-trips: applying diff(base, other) to base yields other', async () => {
+    for (const other of ['ours', 'theirs', 'theirs-conflict']) {
+      const documents = await packageDocuments(changes('base'));
+      applyChanges(documents, await diffPackages(changes('base'), changes(other)));
+      expect(withoutDerived(documents), other).toEqual(withoutDerived(await packageDocuments(changes(other))));
+    }
+  });
+
+  it('addresses changes to the innermost entity', async () => {
+    const [first] = await diffPackages(changes('base'), changes('ours'));
+    expect(first).toEqual({ op: 'replace', entity: 'ut-kyrie-call', path: '/text/en', value: 'Lord, have mercy upon us.' });
+  });
+
+  it('merges non-overlapping changes and reports overlapping ones without writing', async () => {
+    const out = join(await scratch(), 'merged');
+    const result = await mergePackages(changes('base'), changes('ours'), changes('theirs'), out);
+    expect(result.merged).toBe(true);
+    expect((await validatePackage(out)).valid).toBe(true);
+    const corpus = await readFile(join(out, 'corpus.ols.json'), 'utf8');
+    expect(corpus).toContain('upon us');
+    expect(corpus).toContain('ጌታ ሆይ');
+    const conflicted = join(await scratch(), 'merged');
+    const conflict = await mergePackages(changes('base'), changes('ours'), changes('theirs-conflict'), conflicted);
+    expect(conflict.merged).toBe(false);
+    expect(conflict.conflicts).toHaveLength(1);
+    await expect(readFile(join(conflicted, 'manifest.ols.json'))).rejects.toThrow();
+  });
+
+  it('applies an overlay only to the base it was made for', async () => {
+    const overlay = JSON.parse(await readFile(join(fixtures, 'with-overlay/overlays/parish-kyrie.ols.json'), 'utf8'));
+    const base = join(fixtures, 'with-overlay/ols_packages/org.openliturgy.dep');
+    const out = join(await scratch(), 'applied');
+    await applyOverlay(overlay, base, out);
+    expect(await readFile(join(out, 'corpus.ols.json'), 'utf8')).toContain('ጌታ ሆይ');
+    await expect(applyOverlay({ ...overlay, base: { ...overlay.base, version: '9.9.9' } }, base, join(await scratch(), 'x'))).rejects.toThrow(/made for/);
+  });
+
+  it('reports overlays that no longer apply to the locked dependency', async () => {
+    const directory = await scratch();
+    await cp(join(fixtures, 'with-overlay'), directory, { recursive: true });
+    const path = join(directory, 'overlays/parish-kyrie.ols.json');
+    const overlay = JSON.parse(await readFile(path, 'utf8'));
+    overlay.operations[0].path = '/no-such-field';
+    await writeFile(path, JSON.stringify(overlay));
+    let codes = (await validatePackage(directory)).diagnostics.map((d) => `${d.code} ${d.jsonPointer}`);
+    expect(codes).toContain('OLS_OVERLAY_CONFLICT /operations/0');
+    overlay.base.digest = `sha256:${'0'.repeat(64)}`;
+    await writeFile(path, JSON.stringify(overlay));
+    codes = (await validatePackage(directory)).diagnostics.map((d) => d.code);
+    expect(codes).toContain('OLS_OVERLAY_BASE_MISMATCH');
+  });
+
+  it('migrates legacy packages to valid, and is idempotent', async () => {
+    const directory = await scratch();
+    await cp(join(fixtures, 'legacy'), directory, { recursive: true });
+    expect((await validatePackage(directory)).valid).toBe(false);
+    expect((await migratePackage(directory)).length).toBe(12);
+    expect((await validatePackage(directory)).valid).toBe(true);
+    expect(await migratePackage(directory)).toEqual([]);
   });
 });

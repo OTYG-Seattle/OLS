@@ -1,0 +1,10 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/teaching-note.schema.json",
+  "ols_version": "1.1.0",
+  "type": "teaching-note",
+  "id": "teaching-kyrie",
+  "target": "block-kyrie",
+  "summary": {
+    "en": "A plea for mercy shared by deacon and people."
+  }
+}

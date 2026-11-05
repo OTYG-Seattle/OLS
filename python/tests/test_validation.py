@@ -2,14 +2,20 @@ import json
 import shutil
 from pathlib import Path
 
+from openliturgy.changes import ChangeError, apply_at_pointer, apply_changes
 from openliturgy.integrity import canonical_digest, canonicalize
 from openliturgy.models import ValidationReport
 from openliturgy.references import resolve_reference
 from openliturgy.schemas import load_context
 from openliturgy.trust import approval_signature_message, generate_signing_key, verify_signature
 from openliturgy.validation import (
+    apply_overlay,
+    diff_packages,
     lock_package,
+    merge_packages,
+    migrate_package,
     pack_package,
+    package_documents,
     sign_approval,
     sign_package,
     validate_document,
@@ -335,3 +341,87 @@ def test_pack_drops_signatures_only_when_digest_changes(tmp_path: Path) -> None:
     corpus = package / "corpus.ols.json"
     corpus.write_text(corpus.read_text(encoding="utf-8").replace("Lord, have mercy.", "Lord, have mercy!"), encoding="utf-8")
     assert "signatures" not in pack_package(package)
+
+
+CHANGES = FIXTURES / "changes"
+
+
+def _without_derived(documents: dict) -> dict:
+    manifest = {k: v for k, v in documents["manifest.ols.json"].items() if k not in ("digest", "files", "signatures")}
+    return {**documents, "manifest.ols.json": manifest}
+
+
+def test_rfc6902_semantics() -> None:
+    document = {"a": [1, 2], "b": {"c": "x"}}
+    apply_at_pointer(document, "add", "/a/-", 3)
+    apply_at_pointer(document, "add", "/a/0", 0)
+    apply_at_pointer(document, "remove", "/b/c")
+    apply_at_pointer(document, "replace", "/a/1", 9)
+    assert document == {"a": [0, 9, 2, 3], "b": {}}
+    for op, path in (("test", "/a/0"), ("replace", "/missing")):
+        try:
+            apply_at_pointer(document, op, path, 1)
+        except ChangeError:
+            pass
+        else:
+            raise AssertionError(f"{op} {path} should fail")
+
+
+def test_diff_round_trip() -> None:
+    for other in ("ours", "theirs", "theirs-conflict"):
+        documents = package_documents(CHANGES / "base")
+        apply_changes(documents, diff_packages(CHANGES / "base", CHANGES / other))
+        assert _without_derived(documents) == _without_derived(package_documents(CHANGES / other)), other
+
+
+def test_diff_targets_innermost_entity() -> None:
+    assert diff_packages(CHANGES / "base", CHANGES / "ours")[0] == {
+        "op": "replace", "entity": "ut-kyrie-call", "path": "/text/en", "value": "Lord, have mercy upon us.",
+    }
+
+
+def test_merge_clean_and_conflicting(tmp_path: Path) -> None:
+    result = merge_packages(CHANGES / "base", CHANGES / "ours", CHANGES / "theirs", tmp_path / "merged")
+    assert result["merged"]
+    assert validate_package(tmp_path / "merged").valid
+    corpus = (tmp_path / "merged/corpus.ols.json").read_text(encoding="utf-8")
+    assert "upon us" in corpus and "ጌታ ሆይ" in corpus
+    conflict = merge_packages(CHANGES / "base", CHANGES / "ours", CHANGES / "theirs-conflict", tmp_path / "conflicted")
+    assert not conflict["merged"]
+    assert len(conflict["conflicts"]) == 1
+    assert not (tmp_path / "conflicted").exists()
+
+
+def test_apply_overlay_only_to_its_base(tmp_path: Path) -> None:
+    overlay = json.loads((FIXTURES / "with-overlay/overlays/parish-kyrie.ols.json").read_text(encoding="utf-8"))
+    base = FIXTURES / "with-overlay/ols_packages/org.openliturgy.dep"
+    apply_overlay(overlay, base, tmp_path / "applied")
+    assert "ጌታ ሆይ" in (tmp_path / "applied/corpus.ols.json").read_text(encoding="utf-8")
+    try:
+        apply_overlay({**overlay, "base": {**overlay["base"], "version": "9.9.9"}}, base, tmp_path / "x")
+    except ValueError as error:
+        assert "made for" in str(error)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_overlay_diagnostics(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "with-overlay", package)
+    path = package / "overlays/parish-kyrie.ols.json"
+    overlay = json.loads(path.read_text(encoding="utf-8"))
+    overlay["operations"][0]["path"] = "/no-such-field"
+    path.write_text(json.dumps(overlay), encoding="utf-8")
+    assert "OLS_OVERLAY_CONFLICT /operations/0" in [f"{d.code} {d.jsonPointer}" for d in validate_package(package).diagnostics]
+    overlay["base"]["digest"] = "sha256:" + "0" * 64
+    path.write_text(json.dumps(overlay), encoding="utf-8")
+    assert "OLS_OVERLAY_BASE_MISMATCH" in [d.code for d in validate_package(package).diagnostics]
+
+
+def test_migrate_legacy_is_valid_and_idempotent(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "legacy", package)
+    assert not validate_package(package).valid
+    assert len(migrate_package(package)) == 12
+    assert validate_package(package).valid
+    assert migrate_package(package) == []

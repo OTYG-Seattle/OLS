@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ols.otyg.org/schema/v1.0/overlay.schema.json",
+  "title": "OLS Overlay",
+  "description": "A change set applied on top of a pinned base package, e.g. a parish custom on a jurisdiction's common texts. Produced by `ols diff --overlay`, applied with `ols apply`.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "const": "https://ols.otyg.org/schema/v1.0/overlay.schema.json"
+    },
+    "ols_version": {
+      "type": "string",
+      "pattern": "^1\\.[01]\\.[0-9]+$"
+    },
+    "type": {
+      "const": "overlay"
+    },
+    "id": {
+      "$ref": "#/$defs/Id"
+    },
+    "label": {
+      "$ref": "#/$defs/LocalizedText"
+    },
+    "base": {
+      "type": "object",
+      "properties": {
+        "package": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "package",
+        "version",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ChangeOperation"
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "ols_version",
+    "type",
+    "id",
+    "base",
+    "operations"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "LocalizedText": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^(?:[a-z]{2,3}(?:-[a-z]{3}){0,3}|[a-z]{4,8})(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?(?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*(?:-x(?:-[a-z0-9]{1,8})+)?$": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ChangeOperation": {
+      "type": "object",
+      "description": "RFC 6902 operation addressed to an entity (path relative to the entity) or a package document (path relative to the document).",
+      "properties": {
+        "op": {
+          "enum": [
+            "add",
+            "remove",
+            "replace",
+            "test"
+          ]
+        },
+        "entity": {
+          "$ref": "#/$defs/Id"
+        },
+        "document": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(/([^~/]|~[01])*)*$"
+        },
+        "value": {}
+      },
+      "required": [
+        "op",
+        "path"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "entity"
+          ]
+        },
+        {
+          "required": [
+            "document"
+          ]
+        }
+      ],
+      "if": {
+        "properties": {
+          "op": {
+            "enum": [
+              "add",
+              "replace",
+              "test"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "value"
+        ]
+      },
+      "additionalProperties": false
+    }
+  },
+  "x-ols-schema-source": "normative",
+  "x-ols-specification": "https://ols.otyg.org/schema/v1.0/overlay.schema.json",
+  "x-ols-revision": "1.2.0"
+}

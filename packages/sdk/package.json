@@ -9,7 +9,7 @@
     "url": "git+https://github.com/OTYGSeattle/OLS.git",
     "directory": "packages/sdk"
   },
-  "files": ["dist/index.js", "dist/index.d.ts", "dist/integrity.js", "dist/integrity.d.ts", "dist/trust.js", "dist/trust.d.ts"],
+  "files": ["dist/index.js", "dist/index.d.ts", "dist/integrity.js", "dist/integrity.d.ts", "dist/trust.js", "dist/trust.d.ts", "dist/changes.js", "dist/changes.d.ts"],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": { "build": "tsc -p tsconfig.json", "check": "tsc -p tsconfig.json --noEmit", "test": "vitest run" },

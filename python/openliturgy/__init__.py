@@ -1,3 +1,4 @@
+from .changes import ChangeError, apply_changes, combine_changes, diff_values
 from .integrity import canonical_digest, canonicalize, package_digest
 from .loading import LoadedDocument, load_document, load_package
 from .models import Diagnostic, ValidationReport
@@ -6,9 +7,15 @@ from .schemas import SchemaRegistry
 from .trust import generate_signing_key, public_key_for, verify_signature
 from .validation import (
     LOCKFILE_NAME,
+    apply_overlay,
+    create_overlay,
+    diff_packages,
     filesystem_resolver,
     lock_package,
+    merge_packages,
+    migrate_package,
     pack_package,
+    package_documents,
     parse_dependency,
     run_self_tests,
     sign_approval,
@@ -22,19 +29,29 @@ from .validation import (
 
 __all__ = [
     "LOCKFILE_NAME",
+    "ChangeError",
     "Diagnostic",
     "LoadedDocument",
     "SchemaRegistry",
     "ValidationReport",
+    "apply_changes",
+    "apply_overlay",
     "canonical_digest",
     "canonicalize",
+    "combine_changes",
+    "create_overlay",
+    "diff_packages",
+    "diff_values",
     "filesystem_resolver",
     "generate_signing_key",
     "load_document",
     "load_package",
     "lock_package",
+    "merge_packages",
+    "migrate_package",
     "pack_package",
     "package_digest",
+    "package_documents",
     "parse_dependency",
     "public_key_for",
     "resolve_reference",

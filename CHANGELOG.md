@@ -26,6 +26,11 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - **Keyrings.** `keyring.schema.json` describes the keys a consumer trusts, optionally limited to the statuses they may attest (`approves`). `--keyring` on `ols verify` (strict: `OLS_PACKAGE_UNSIGNED`, `OLS_APPROVAL_UNTRUSTED`) and on `ols validate`. Signature checks: `OLS_SIGNATURE_INVALID`, `OLS_SIGNATURE_UNTRUSTED`.
 - The Python package now depends on `cryptography` for Ed25519.
 - *Signatures & Approvals* article.
+- **Change sets.** RFC 6902 operations (`add`, `remove`, `replace`, `test`) addressed to an entity by ID or to a document. `ols diff` / `diffPackages` / `diff_packages` produce them deterministically: entity arrays are matched by ID, and derived manifest members are ignored.
+- **Overlays.** A new `overlay` document type (`overlay.schema.json`) pins a change set to a base package's version and digest. Overlays in a package are checked against the locked dependency (`OLS_OVERLAY_BASE_UNRESOLVED`, `OLS_OVERLAY_BASE_MISMATCH`, `OLS_OVERLAY_CONFLICT`). `ols diff --overlay` creates one and `ols apply` applies one. Overlay payloads are not indexed as entities of the containing package.
+- **Three-way merge.** `ols merge BASE OURS THEIRS` / `mergePackages` / `merge_packages` combine non-overlapping entity-level changes and assets, write and pack the result, and otherwise report conflicts without writing anything.
+- **Migration.** `ols migrate` / `migratePackage` / `migrate_package` rewrite pre-1.1 conventions (subtype in `type`, untyped `authority`, role `labels`, role-group `members`, `$ref` objects in ID lists). Migration is idempotent.
+- *Overlays, Diff & Merge* article.
 - New *Sharing & Distribution* docs category with an *Integrity & Canonical Form* article.
 - `npm run schemas:provenance` recomputes schema provenance digests and syncs the Python schema copy.
 

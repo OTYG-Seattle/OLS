@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { Command } from 'commander';
-import { generateSigningKey, lockPackage, packPackage, signApproval, signPackage, runSelfTests, SchemaRegistry, validateDocument, validatePackage, verifyPackage } from '@openliturgy/sdk';
+import { applyOverlay, createOverlay, diffPackages, generateSigningKey, mergePackages, migratePackage, lockPackage, packPackage, signApproval, signPackage, runSelfTests, SchemaRegistry, validateDocument, validatePackage, verifyPackage } from '@openliturgy/sdk';
 import type { Keyring, ValidationReport } from '@openliturgy/sdk';
 
 const readKeyring = async (path?: string): Promise<Keyring | undefined> => (path ? JSON.parse(await readFile(resolve(path), 'utf8')) as Keyring : undefined);
@@ -78,6 +78,37 @@ program.command('sign').description('Sign a packed package (directory) or an app
       const entry = (await stat(target)).isDirectory() ? await signPackage(target, privateKeyPem, { signer: options.signer }) : await signApproval(target, privateKeyPem, { signer: options.signer });
       process.stdout.write(`Signed with ${entry.key}\n`);
     } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; }
+  });
+const fail = (error: unknown) => { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; };
+const printJson = (value: unknown) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+program.command('diff').description('Print the entity-level change set that turns BASE into OTHER (or an overlay with --overlay)')
+  .argument('<base>').argument('<other>').option('--overlay <id>', 'wrap the changes in an overlay document pinned to BASE')
+  .action(async (base, other, options) => {
+    try { printJson(options.overlay ? await createOverlay(resolve(base), resolve(other), options.overlay) : await diffPackages(resolve(base), resolve(other))); }
+    catch (error) { fail(error); }
+  });
+program.command('apply').description('Apply an overlay to its base package and write the packed result')
+  .argument('<overlay>', 'overlay document').requiredOption('--base <dir>', 'base package').requiredOption('--out <dir>', 'output directory (empty or absent)')
+  .action(async (overlay, options) => {
+    try {
+      const manifest = await applyOverlay(JSON.parse(await readFile(resolve(overlay), 'utf8')), resolve(options.base), resolve(options.out));
+      process.stdout.write(`${String(manifest.digest)}\n`);
+    } catch (error) { fail(error); }
+  });
+program.command('merge').description('Three-way merge of OURS and THEIRS, both derived from BASE')
+  .argument('<base>').argument('<ours>').argument('<theirs>').requiredOption('--out <dir>', 'output directory (empty or absent)')
+  .action(async (base, ours, theirs, options) => {
+    try {
+      const result = await mergePackages(resolve(base), resolve(ours), resolve(theirs), resolve(options.out));
+      if (result.merged) process.stdout.write(`${String(result.manifest?.digest)}\n`);
+      else { printJson({ conflicts: result.conflicts }); process.exitCode = 1; }
+    } catch (error) { fail(error); }
+  });
+program.command('migrate').description('Rewrite pre-1.1 conventions (subtype in type, $ref objects in ID lists, ...) in a package or document')
+  .argument('<path>').option('--dry-run', 'report the changes without writing them')
+  .action(async (path, options) => {
+    try { printJson(await migratePackage(resolve(path), { write: !options.dryRun })); }
+    catch (error) { fail(error); }
   });
 program.command('schemas').command('refresh').option('--cache <path>', 'schema cache directory', resolve(homedir(), '.cache', 'ols', 'schemas')).action(async (options) => {
   try { const registry = await SchemaRegistry.bundled(); await registry.refresh(options.cache); }

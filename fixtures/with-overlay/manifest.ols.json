@@ -1,0 +1,18 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.parish-custom",
+  "version": "1.0.0",
+  "title": {
+    "en": "Parish customs as an overlay on shared texts"
+  },
+  "license": "Apache-2.0",
+  "dependencies": [
+    "org.openliturgy.dep@1"
+  ],
+  "files": [
+    "overlays/parish-kyrie.ols.json",
+    "ols.lock.json"
+  ]
+}

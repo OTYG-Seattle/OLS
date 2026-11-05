@@ -1,0 +1,10 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.changes-demo",
+  "version": "1.0.0",
+  "title": { "en": "Change exchange demo" },
+  "license": "Apache-2.0",
+  "files": ["corpus.ols.json"]
+}

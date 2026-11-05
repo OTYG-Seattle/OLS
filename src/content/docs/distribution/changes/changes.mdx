@@ -1,0 +1,113 @@
+---
+title: 'Overlays, Diff & Merge'
+description: 'Entity-level change sets for reviewing changes, publishing local customs as overlays, merging parallel edits, and migrating older packages.'
+category: 'distribution'
+order: 45
+updatedAt: 2026-11-05
+---
+
+Liturgical texts are edited in parallel: a translation team improves wording while a parish adds its customs and a scholar adds a manuscript witness. OLS describes all of these as **change sets** addressed to entities by ID. A change set can be reviewed, carried as an overlay on a pinned base, or combined with another change set in a three-way merge.
+
+## Change Sets
+
+A change set is a list of [RFC 6902](https://www.rfc-editor.org/rfc/rfc6902) operations (`add`, `remove`, `replace`, `test`). Each one targets either an **entity**, with `path` relative to that entity, or a **document**, with `path` relative to the document:
+
+```json
+[
+  { "op": "replace", "entity": "ut-kyrie-call", "path": "/text/en", "value": "Lord, have mercy upon us." },
+  { "op": "add", "entity": "ut-kyrie-response", "path": "/text/am-Ethi", "value": "ጌታ ሆይ፥ ማረን።" },
+  { "op": "add", "document": "teaching/kyrie.ols.json", "path": "", "value": { "type": "teaching-note" } }
+]
+```
+
+Because operations name entities rather than file positions, they survive reformatting, moving an entity to another file, and unrelated edits elsewhere in the package.
+
+```bash
+ols diff ./base ./edited                 # print the change set
+ols diff ./base ./edited --overlay my-id # wrap it as an overlay pinned to ./base
+```
+
+`ols diff` is deterministic and identical in both SDKs:
+
+- Object members are compared in code-unit order.
+- Arrays of entities are matched **by ID**: removals come first, then changes inside kept entities, then insertions. Inserting one block therefore does not rewrite the whole list.
+- Each change is addressed to the innermost entity that contains it.
+- Derived manifest members (`digest`, `files`, `signatures`) are ignored, because `ols pack` recomputes them.
+
+## Overlays
+
+An overlay is a change set pinned to the exact base it was made against: package name, version, and [package digest](/advanced-profiles/distribution/integrity). This is how a parish publishes its customs on top of a jurisdiction's texts without copying or forking them.
+
+```json
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/overlay.schema.json",
+  "ols_version": "1.1.0",
+  "type": "overlay",
+  "id": "overlay-parish-kyrie",
+  "base": {
+    "package": "org.openliturgy.dep",
+    "version": "1.2.0",
+    "digest": "sha256:459d65c184950f62782e041f0e95bc4180e83b3e7f4a3f7326f79c03c0d5761d"
+  },
+  "operations": [
+    { "op": "replace", "entity": "ut-kyrie", "path": "/mode", "value": "responsive" },
+    { "op": "add", "entity": "ut-kyrie", "path": "/text/am-Ethi", "value": "ጌታ ሆይ፥ ማረን።" }
+  ]
+}
+```
+
+Ship overlays in a package that declares and [locks](/advanced-profiles/distribution/dependencies) the base as a dependency. Validation then checks that every overlay still applies:
+
+| Code                          | Meaning                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| `OLS_OVERLAY_BASE_UNRESOLVED` | The overlay's base is not a locked dependency.                                         |
+| `OLS_OVERLAY_BASE_MISMATCH`   | The locked dependency has a different version or digest than the overlay was made for. |
+| `OLS_OVERLAY_CONFLICT`        | An operation no longer applies (missing entity or path, or a failed `test`).           |
+
+Use `test` operations to state what the overlay expects to find, so a changed base fails loudly instead of being patched blindly. To produce a standalone customized package:
+
+```bash
+ols apply overlays/parish-kyrie.ols.json --base ols_packages/org.openliturgy.dep --out ./customized
+```
+
+`ols apply` refuses a base that does not match the overlay's pin, writes to an empty directory, and packs the result.
+
+## Three-Way Merge
+
+```bash
+ols merge ./base ./ours ./theirs --out ./merged
+```
+
+Both sides are diffed against the common base. Identical changes are kept once. Two changes **conflict** when they touch the same entity at overlapping paths, or when both insert into or remove from the same array. Assets merge file by file. On any conflict, `ols merge` prints the conflicting operations, writes nothing, and exits with status 1:
+
+```json
+{
+  "conflicts": [
+    {
+      "ours": { "op": "replace", "entity": "ut-kyrie-call", "path": "/text/en", "value": "Lord, have mercy upon us." },
+      "theirs": { "op": "replace", "entity": "ut-kyrie-call", "path": "/text/en", "value": "O Lord, have mercy." }
+    }
+  ]
+}
+```
+
+Otherwise the merged package is written and packed. `tests/` and `ols_packages/` are taken from `ours`.
+
+## Migrating Older Packages
+
+`ols migrate` rewrites conventions that earlier drafts of this specification used:
+
+| Rule                 | Before                                  | After                                               |
+| -------------------- | --------------------------------------- | --------------------------------------------------- |
+| `type-kind`          | `"type": "deacon"` in `roles`           | `"type": "role", "kind": "deacon"`                  |
+| `authority-type`     | `"authority": { "status": … }`          | `"authority": { "status": …, "type": "authority" }` |
+| `label-singular`     | role `labels`                           | role `label`                                        |
+| `role-group-roles`   | role-group `members`                    | role-group `roles`                                  |
+| `id-list-ref-object` | `"blocks": [{ "$ref": "block-kyrie" }]` | `"blocks": ["block-kyrie"]`                         |
+
+```bash
+ols migrate ./package --dry-run   # report what would change
+ols migrate ./package             # rewrite in place, then run ols pack
+```
+
+Migration is idempotent: a second run reports nothing.

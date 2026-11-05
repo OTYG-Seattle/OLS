@@ -125,6 +125,12 @@
     "revision": "1.0.0",
     "sha256": "418096520ca5f6aee7904a689ff8e6691e3760b384c4a90d746f3657a88b4860"
   },
+  "overlay.schema.json": {
+    "source": "normative",
+    "specification": "https://ols.otyg.org/schema/v1.0/overlay.schema.json",
+    "revision": "1.2.0",
+    "sha256": "ac7d77ae2b18f19b693948d7cee8a6fce6820be172d4b426a62880112ecfd472"
+  },
   "person.schema.json": {
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/person.schema.json",
