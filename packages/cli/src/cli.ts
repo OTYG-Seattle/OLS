@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { Command } from 'commander';
-import { packPackage, runSelfTests, SchemaRegistry, validateDocument, validatePackage, verifyPackage } from '@openliturgy/sdk';
+import { lockPackage, packPackage, runSelfTests, SchemaRegistry, validateDocument, validatePackage, verifyPackage } from '@openliturgy/sdk';
 import type { ValidationReport } from '@openliturgy/sdk';
 
 function printReport(report: ValidationReport, format: string): void {
@@ -48,6 +48,15 @@ program.command('pack').description('Pin every package document by digest in man
     try {
       const manifest = await packPackage(resolve(path), { write: !options.stdout });
       process.stdout.write(options.stdout ? `${JSON.stringify(manifest, null, 2)}\n` : `${String(manifest.digest)}\n`);
+    } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; }
+  });
+program.command('lock').description('Pin every declared dependency (found under ols_packages/<name>) to its version and package digest in ols.lock.json')
+  .argument('<path>', 'package directory').option('--packages-dir <dir>', 'directory holding resolved dependencies', 'ols_packages').option('--stdout', 'print the lockfile instead of writing it')
+  .action(async (path, options) => {
+    try {
+      const { lock, manifestUpdated } = await lockPackage(resolve(path), { packagesDirectory: options.packagesDir, write: !options.stdout });
+      if (options.stdout) process.stdout.write(`${JSON.stringify(lock, null, 2)}\n`);
+      else process.stdout.write(`Locked ${Object.keys(lock.packages as object).length} dependencies.${manifestUpdated ? ' Added ols.lock.json to manifest files; run `ols pack` to re-pin.' : ''}\n`);
     } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; }
   });
 program.command('schemas').command('refresh').option('--cache <path>', 'schema cache directory', resolve(homedir(), '.cache', 'ols', 'schemas')).action(async (options) => {

@@ -12,6 +12,10 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - `manifest.files` entries may be `{ path, digest, mediaType }`. `manifest.digest` pins the whole package. Assets accept `digest`, `byteSize`, and `mediaType`.
 - `validatePackage` checks every declared digest (`OLS_FILE_DIGEST_MISMATCH`, `OLS_PACKAGE_DIGEST_MISMATCH`, `OLS_ASSET_DIGEST_MISMATCH`, `OLS_ASSET_SIZE_MISMATCH`) and warns about missing package-local asset files (`OLS_ASSET_NOT_FOUND`).
 - `ols pack` / `packPackage` / `pack_package` pin every document and recompute the package digest. `ols verify` / `verifyPackage` / `verify_package` additionally require everything to be pinned (`OLS_FILE_UNPINNED`, `OLS_ASSET_UNPINNED`, `OLS_PACKAGE_DIGEST_MISSING`).
+- **Dependency lockfile and resolution.** `ols.lock.json` (new `lock.schema.json`) pins each declared dependency to an exact version, package digest, and location. `ols lock` / `lockPackage` / `lock_package` write it from `ols_packages/<name>`. When a lockfile is present, `validatePackage` loads each dependency, checks it against the lock (`OLS_DEPENDENCY_UNLOCKED`, `OLS_DEPENDENCY_NOT_FOUND`, `OLS_DEPENDENCY_MISMATCH`, `OLS_DEPENDENCY_VERSION_MISMATCH`, `OLS_DEPENDENCY_DIGEST_MISMATCH`, `OLS_DEPENDENCY_INTEGRITY`, `OLS_LOCK_ENTRY_UNUSED`), and resolves `dependency:id` references in it instead of reporting `OLS_REF_EXTERNAL`. A custom `resolver` can be passed for other storage.
+- Dependency ranges (`name@1`, `name@1.2`, `name@1.2.3`) are version prefixes. `parseDependency` and `versionSatisfies` are exported, and the manifest schema now constrains the format.
+- **ID aliases.** `manifest.aliases` maps renamed IDs to current ones. References through an alias resolve with an `OLS_ID_RENAMED` warning, including references into a dependency. Broken aliases report `OLS_ALIAS_SHADOWED` or `OLS_ALIAS_TARGET_UNRESOLVED`.
+- `ols_packages/` directories are skipped when loading a package, like `tests/`.
 - New *Sharing & Distribution* docs category with an *Integrity & Canonical Form* article.
 - `npm run schemas:provenance` recomputes schema provenance digests and syncs the Python schema copy.
 

@@ -6,11 +6,13 @@ from openliturgy.integrity import canonical_digest, canonicalize
 from openliturgy.models import ValidationReport
 from openliturgy.references import resolve_reference
 from openliturgy.validation import (
+    lock_package,
     pack_package,
     validate_document,
     validate_package,
     validate_translation_variants,
     verify_package,
+    version_satisfies,
 )
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -205,3 +207,50 @@ def test_pack_makes_package_verifiable(tmp_path: Path) -> None:
     assert manifest["digest"].startswith("sha256:")
     assert verify_package(package).valid
     assert validate_package(package).valid
+
+
+def _reference_codes(result: ValidationReport) -> list[str]:
+    return [f"{d.code} {d.jsonPointer}" for d in result.diagnostics if d.layer == "references"]
+
+
+def test_dependency_and_alias_resolution() -> None:
+    assert _reference_codes(validate_package(FIXTURES / "with-dependency")) == [
+        "OLS_ID_RENAMED /ordos/0/sections/0",
+        "OLS_ID_RENAMED /sections/0/blocks/1",
+        "OLS_REF_UNRESOLVED /sections/0/blocks/2",
+    ]
+
+
+def test_changed_dependency_is_reported(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "with-dependency", package)
+    corpus = package / "ols_packages/org.openliturgy.dep/corpus.ols.json"
+    corpus.write_text(corpus.read_text(encoding="utf-8").replace("Lord, have mercy.", "Lord, have mercy!"), encoding="utf-8")
+    assert "OLS_DEPENDENCY_INTEGRITY" in [d.code for d in validate_package(package).diagnostics]
+
+
+def test_unlocked_dependency_is_reported(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "with-dependency", package)
+    (package / "ols.lock.json").write_text(json.dumps({
+        "$schema": "https://ols.otyg.org/schema/v1.0/lock.schema.json", "ols_version": "1.1.0", "type": "lock",
+        "packages": {},
+    }), encoding="utf-8")
+    assert "OLS_DEPENDENCY_UNLOCKED" in [d.code for d in validate_package(package).diagnostics]
+
+
+def test_custom_resolver() -> None:
+    result = validate_package(FIXTURES / "with-dependency", resolver=lambda name, entry, root: None)
+    assert "OLS_DEPENDENCY_NOT_FOUND" in [d.code for d in result.diagnostics]
+
+
+def test_lock_matches_checked_in_lockfile() -> None:
+    lock, _ = lock_package(FIXTURES / "with-dependency", write=False)
+    assert lock == json.loads((FIXTURES / "with-dependency/ols.lock.json").read_text(encoding="utf-8"))
+
+
+def test_version_ranges_are_prefixes() -> None:
+    assert version_satisfies("1.2.0", "1")
+    assert version_satisfies("1.2.0", "1.2")
+    assert not version_satisfies("10.0.0", "1")
+    assert not version_satisfies("1.3.0", "1.2")

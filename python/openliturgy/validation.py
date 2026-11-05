@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -14,8 +14,8 @@ from .integrity import (
     manifest_file_entries,
     package_digest,
 )
-from .loading import LoadedDocument, load_document, load_package
-from .models import Diagnostic, Layer, ValidationReport
+from .loading import DEFAULT_PACKAGES_DIRECTORY, LoadedDocument, load_document, load_package
+from .models import Diagnostic, Layer, Severity, ValidationReport
 from .references import package_qualifier, resolve_reference
 from .schemas import SchemaRegistry
 
@@ -299,7 +299,154 @@ def _reference_sites(entities: list[dict[str, Any]], refs: list[dict[str, Any]])
     return sites
 
 
-def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -> ValidationReport:
+LOCKFILE_NAME = "ols.lock.json"
+DependencyResolver = Callable[[str, dict[str, Any], Path], Path | None]
+"""Returns the directory of a locked dependency, or ``None`` when it cannot be found."""
+
+
+def filesystem_resolver(name: str, entry: dict[str, Any], root: Path) -> Path | None:
+    """Resolve ``lock.packages[name].resolved`` as a directory relative to the package root."""
+    resolved = entry.get("resolved")
+    if not isinstance(resolved, str) or not is_package_relative_uri(resolved):
+        return None
+    directory = (root / resolved).resolve()
+    return directory if (directory / "manifest.ols.json").is_file() else None
+
+
+def parse_dependency(spec: str) -> tuple[str, str | None]:
+    """Split a manifest dependency (``name`` or ``name@range``)."""
+    name, at, version_range = spec.partition("@")
+    return name, (version_range if at else None)
+
+
+def version_satisfies(version: str, version_range: str | None) -> bool:
+    """A range is a version prefix: ``1`` matches 1.x.y, ``1.2`` matches 1.2.y, ``1.2.3`` matches exactly."""
+    if not version_range:
+        return True
+    have = version.split(".")
+    return all(i < len(have) and have[i] == part for i, part in enumerate(version_range.split(".")))
+
+
+def _pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _string_record(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(item, str)}
+
+
+def _load_dependencies(
+    root: Path,
+    manifest: dict[str, Any],
+    documents: list[LoadedDocument],
+    resolver: DependencyResolver,
+    diagnostics: list[Diagnostic],
+) -> dict[str, dict[str, Any]]:
+    """Load every dependency pinned in ``ols.lock.json`` and check it against the lock. Mirrors ``loadDependencies``."""
+    loaded: dict[str, dict[str, Any]] = {}
+    lock_source = (root / LOCKFILE_NAME).as_posix()
+    lock_document = next((doc for doc in documents if doc.source == lock_source), None)
+    if lock_document is None or lock_document.data is None:
+        return loaded
+    lock = _parsed(lock_document)
+    locked = lock.get("packages") if isinstance(lock.get("packages"), dict) else {}
+    specs = [item for item in manifest.get("dependencies", []) if isinstance(item, str)] if isinstance(
+        manifest.get("dependencies"), list
+    ) else []
+    declared = [parse_dependency(spec) for spec in specs]
+
+    def push(pointer: str, code: str, message: str, severity: Severity = "error") -> None:
+        diagnostics.append(
+            Diagnostic(
+                layer="references", source=lock_source, jsonPointer=pointer, code=code, message=message, severity=severity
+            )
+        )
+
+    for name, version_range in declared:
+        base = f"/packages/{_pointer_token(name)}"
+        entry = locked.get(name)
+        if not isinstance(entry, dict):
+            push("/packages", "OLS_DEPENDENCY_UNLOCKED", f"Dependency {name} is declared but not locked; run `ols lock`.")
+            continue
+        if not version_satisfies(str(entry.get("version")), version_range):
+            push(
+                f"{base}/version",
+                "OLS_DEPENDENCY_VERSION_MISMATCH",
+                f"Locked version {entry.get('version')} does not satisfy {name}@{version_range}.",
+            )
+        directory = resolver(name, entry, root) if isinstance(entry.get("resolved"), str) else None
+        if directory is None:
+            push(
+                f"{base}/resolved",
+                "OLS_DEPENDENCY_NOT_FOUND",
+                f"Dependency {name} could not be found at {entry.get('resolved')}.",
+            )
+            continue
+        directory = Path(directory).resolve()
+        dependency_documents = load_package(directory)
+        manifest_source = (directory / "manifest.ols.json").as_posix()
+        dependency_manifest_document = next((doc for doc in dependency_documents if doc.source == manifest_source), None)
+        dependency_manifest = (
+            _parsed(dependency_manifest_document)
+            if dependency_manifest_document is not None and isinstance(dependency_manifest_document.raw, dict)
+            else None
+        )
+        if not isinstance(dependency_manifest, dict) or dependency_manifest.get("package") != name:
+            push(base, "OLS_DEPENDENCY_MISMATCH", f"The package at {entry.get('resolved')} is not {name}.")
+            continue
+        if dependency_manifest.get("version") != entry.get("version"):
+            push(
+                f"{base}/version",
+                "OLS_DEPENDENCY_VERSION_MISMATCH",
+                f"Resolved {name} is version {dependency_manifest.get('version')}, but the lock records "
+                f"{entry.get('version')}.",
+            )
+        actual = package_digest(dependency_manifest)
+        if actual != entry.get("digest"):
+            push(
+                f"{base}/digest",
+                "OLS_DEPENDENCY_DIGEST_MISMATCH",
+                f"Resolved {name} has package digest {actual}, but the lock records {entry.get('digest')}.",
+            )
+        entities: list[dict[str, Any]] = []
+        for document in dependency_documents:
+            if isinstance(document.raw, dict):
+                entities.extend(_walk(_parsed(document), document.source)[0])
+        problems = [
+            item
+            for item in _integrity_diagnostics(directory, dependency_documents, entities, strict=True)
+            if item.severity == "error"
+        ]
+        if problems:
+            codes = ", ".join(sorted({item.code for item in problems}))
+            push(base, "OLS_DEPENDENCY_INTEGRITY", f"Dependency {name} failed verification: {codes}.")
+        ids: set[str] = set()
+        for entity in entities:
+            ids.add(str(entity["value"]["id"]))
+        loaded[name] = {
+            "version": str(dependency_manifest.get("version")),
+            "ids": ids,
+            "aliases": _string_record(dependency_manifest.get("aliases")),
+        }
+    declared_names = {name for name, _ in declared}
+    for name in sorted(locked, key=lambda item: item.encode("utf-16-be")):
+        if name not in declared_names:
+            push(
+                f"/packages/{_pointer_token(name)}",
+                "OLS_LOCK_ENTRY_UNUSED",
+                f"Lock entry {name} is not a declared dependency.",
+                "warning",
+            )
+    return loaded
+
+
+def validate_package(
+    root: str | Path,
+    registry: SchemaRegistry | None = None,
+    resolver: DependencyResolver | None = None,
+) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
     documents = load_package(directory)
@@ -354,13 +501,79 @@ def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -
     def is_declared_dependency(name: str) -> bool:
         return any(item.split("@", 1)[0] == name for item in dependencies)
 
+    dependency_packages = (
+        _load_dependencies(directory, manifest, documents, resolver or filesystem_resolver, diagnostics)
+        if isinstance(manifest, dict)
+        else {}
+    )
+    aliases = _string_record(manifest.get("aliases")) if isinstance(manifest, dict) else {}
+    manifest_path = (directory / "manifest.ols.json").as_posix()
+    for former, current in aliases.items():
+        if former in index:
+            diagnostics.append(
+                Diagnostic(
+                    layer="references",
+                    source=manifest_path,
+                    jsonPointer=f"/aliases/{_pointer_token(former)}",
+                    code="OLS_ALIAS_SHADOWED",
+                    message=f"Alias {former} is also the ID of an entity, so the alias never applies.",
+                    severity="error",
+                )
+            )
+        if current not in index:
+            diagnostics.append(
+                Diagnostic(
+                    layer="references",
+                    source=manifest_path,
+                    jsonPointer=f"/aliases/{_pointer_token(former)}",
+                    code="OLS_ALIAS_TARGET_UNRESOLVED",
+                    message=f"Alias {former} points to {current}, which does not exist.",
+                    severity="error",
+                )
+            )
+
+    def renamed(site: dict[str, str], former: str, current: str) -> None:
+        diagnostics.append(
+            Diagnostic(
+                layer="references",
+                source=site["source"],
+                jsonPointer=site["pointer"],
+                code="OLS_ID_RENAMED",
+                message=f"{former} was renamed; reference {current} instead.",
+                severity="warning",
+            )
+        )
+
     sites = _reference_sites(entities, refs)
     for reference in sites:
         target = reference["value"]
         if resolve_reference(target, index, directory, reference["source"], package_name) is not None:
             continue
         qualified = package_qualifier(target)
+        local_id = (qualified[1] if qualified[0] == package_name else None) if qualified is not None else target
+        if local_id is not None and local_id in aliases and aliases[local_id] in index:
+            renamed(reference, target, aliases[local_id])
+            continue
         if isinstance(manifest, dict) and qualified is not None and qualified[0] != package_name:
+            dependency_package = dependency_packages.get(qualified[0])
+            if dependency_package is not None:
+                if qualified[1] in dependency_package["ids"]:
+                    continue
+                alias_target = dependency_package["aliases"].get(qualified[1])
+                if alias_target is not None and alias_target in dependency_package["ids"]:
+                    renamed(reference, target, f"{qualified[0]}:{alias_target}")
+                    continue
+                diagnostics.append(
+                    Diagnostic(
+                        layer="references",
+                        source=reference["source"],
+                        jsonPointer=reference["pointer"],
+                        code="OLS_REF_UNRESOLVED",
+                        message=f"{qualified[1]} is not defined by dependency {qualified[0]}@{dependency_package['version']}.",
+                        severity="error",
+                    )
+                )
+                continue
             # Undeclared packages are reported as OLS_DEPENDENCY_UNDECLARED below.
             if is_declared_dependency(qualified[0]):
                 diagnostics.append(
@@ -814,6 +1027,51 @@ def pack_package(root: str | Path, write: bool = True) -> dict[str, Any]:
     if write:
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return manifest
+
+
+def lock_package(
+    root: str | Path, packages_directory: str = DEFAULT_PACKAGES_DIRECTORY, write: bool = True
+) -> tuple[dict[str, Any], bool]:
+    """Write ``ols.lock.json`` for every declared dependency under ``packages_directory``. Mirrors ``lockPackage``."""
+    directory = Path(root).resolve()
+    packages_directory = packages_directory.replace("\\", "/")
+    manifest_path = directory / "manifest.ols.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    packages: dict[str, dict[str, str]] = {}
+    for spec in manifest.get("dependencies", []) if isinstance(manifest.get("dependencies"), list) else []:
+        name, version_range = parse_dependency(spec)
+        resolved = f"{packages_directory}/{name}"
+        dependency_directory = (directory / resolved).resolve()
+        try:
+            dependency = json.loads((dependency_directory / "manifest.ols.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"Dependency {name} was not found at {resolved}.") from error
+        if dependency.get("package") != name:
+            raise ValueError(f"The package at {resolved} is {dependency.get('package')}, not {name}.")
+        if not version_satisfies(str(dependency.get("version")), version_range):
+            raise ValueError(f"{name} {dependency.get('version')} does not satisfy {spec}.")
+        verification = verify_package(dependency_directory)
+        if not verification.valid:
+            codes = ", ".join(dict.fromkeys(item.code for item in verification.diagnostics))
+            raise ValueError(f"Dependency {name} does not verify; run `ols pack` in it ({codes}).")
+        packages[name] = {"version": str(dependency.get("version")), "digest": str(dependency.get("digest")), "resolved": resolved}
+    lock = {
+        "$schema": "https://ols.otyg.org/schema/v1.0/lock.schema.json",
+        "ols_version": manifest["ols_version"] if isinstance(manifest.get("ols_version"), str) else "1.1.0",
+        "type": "lock",
+        "packages": dict(sorted(packages.items(), key=lambda item: item[0].encode("utf-16-be"))),
+    }
+    manifest_updated = False
+    if isinstance(manifest.get("files"), list) and not any(
+        entry["path"] == LOCKFILE_NAME for entry in manifest_file_entries(manifest["files"])
+    ):
+        manifest["files"] = [*manifest["files"], LOCKFILE_NAME]
+        manifest_updated = True
+    if write:
+        (directory / LOCKFILE_NAME).write_text(json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        if manifest_updated:
+            manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return lock, manifest_updated
 
 
 def validate_translation_variants(data: dict[str, Any], source: str = "<inline>") -> list[Diagnostic]:

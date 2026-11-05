@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.dep",
+  "version": "1.2.0",
+  "title": {
+    "en": "Shared common texts"
+  },
+  "license": "Apache-2.0",
+  "aliases": {
+    "block-kyrie-old": "block-kyrie"
+  },
+  "files": [
+    {
+      "path": "corpus.ols.json",
+      "digest": "sha256:c6f0889dd33fbe1548ff026d68f9ae9623289946191931a813f50234cc7ff102"
+    }
+  ],
+  "digest": "sha256:459d65c184950f62782e041f0e95bc4180e83b3e7f4a3f7326f79c03c0d5761d"
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.parish",
+  "version": "1.0.0",
+  "title": {
+    "en": "Parish package using a dependency"
+  },
+  "license": "Apache-2.0",
+  "dependencies": [
+    "org.openliturgy.dep@1"
+  ],
+  "aliases": {
+    "sec-entrance": "sec-word"
+  },
+  "files": [
+    "corpus.ols.json",
+    "ols.lock.json"
+  ]
+}

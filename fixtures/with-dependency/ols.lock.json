@@ -1,0 +1,12 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/lock.schema.json",
+  "ols_version": "1.1.0",
+  "type": "lock",
+  "packages": {
+    "org.openliturgy.dep": {
+      "version": "1.2.0",
+      "digest": "sha256:459d65c184950f62782e041f0e95bc4180e83b3e7f4a3f7326f79c03c0d5761d",
+      "resolved": "ols_packages/org.openliturgy.dep"
+    }
+  }
+}
