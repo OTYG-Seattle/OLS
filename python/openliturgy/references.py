@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 
 def resolve_reference(
     reference: str,
     index: dict[str, dict[str, Any]],
-    package_root: Optional[Union[str, Path]] = None,
-    source: Optional[Union[str, Path]] = None,
-) -> Optional[dict[str, Any]]:
+    package_root: str | Path | None = None,
+    source: str | Path | None = None,
+) -> dict[str, Any] | None:
     local = reference
     if reference.startswith("urn:ols:"):
         local = reference[8:].replace(":", ".")
