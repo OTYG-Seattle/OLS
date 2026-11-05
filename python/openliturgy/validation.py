@@ -290,7 +290,7 @@ def _reference_sites(entities: list[dict[str, Any]], refs: list[dict[str, Any]])
     return sites
 
 
-def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] = None) -> ValidationReport:
+def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
     documents = load_package(directory)
