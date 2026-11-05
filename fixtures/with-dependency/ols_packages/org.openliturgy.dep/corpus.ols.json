@@ -1,0 +1,13 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
+  "ols_version": "1.1.0",
+  "type": "corpus",
+  "id": "dep-common",
+  "roles": [{ "type": "role", "id": "role-cantor", "kind": "cantor" }],
+  "blocks": [
+    {
+      "type": "block", "kind": "response", "id": "block-kyrie",
+      "elements": [{ "utterance": { "id": "ut-kyrie", "roles": ["role-cantor"], "mode": "chanted", "text": { "en": "Lord, have mercy." } } }]
+    }
+  ]
+}

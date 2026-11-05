@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { canonicalDigest, canonicalize, packPackage, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
+import { canonicalDigest, canonicalize, lockPackage, packPackage, versionSatisfies, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), '../../../fixtures');
 
@@ -245,5 +245,54 @@ describe('canonical form and integrity', () => {
     expect(manifest.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect((await verifyPackage(directory)).valid).toBe(true);
     expect((await validatePackage(directory)).valid).toBe(true);
+  });
+});
+
+describe('dependencies and aliases', () => {
+  const codesAt = (diagnostics: import('@openliturgy/types').Diagnostic[]) => diagnostics.filter((d) => d.layer === 'references').map((d) => `${d.code} ${d.jsonPointer}`);
+  const copyFixture = async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ols-deps-'));
+    await cp(join(fixtures, 'with-dependency'), directory, { recursive: true });
+    return directory;
+  };
+
+  it('resolves references through the locked dependency and aliases', async () => {
+    const result = await validatePackage(join(fixtures, 'with-dependency'));
+    expect(codesAt(result.diagnostics)).toEqual([
+      'OLS_ID_RENAMED /ordos/0/sections/0',
+      'OLS_ID_RENAMED /sections/0/blocks/1',
+      'OLS_REF_UNRESOLVED /sections/0/blocks/2',
+    ]);
+  });
+
+  it('reports a dependency that changed after it was locked', async () => {
+    const directory = await copyFixture();
+    const corpus = join(directory, 'ols_packages/org.openliturgy.dep/corpus.ols.json');
+    await writeFile(corpus, (await readFile(corpus, 'utf8')).replace('Lord, have mercy.', 'Lord, have mercy!'));
+    const codes = (await validatePackage(directory)).diagnostics.map((d) => d.code);
+    expect(codes).toContain('OLS_DEPENDENCY_INTEGRITY');
+  });
+
+  it('reports a declared dependency that is missing from the lock', async () => {
+    const directory = await copyFixture();
+    await writeFile(join(directory, 'ols.lock.json'), JSON.stringify({ $schema: 'https://ols.otyg.org/schema/v1.0/lock.schema.json', ols_version: '1.1.0', type: 'lock', packages: {} }));
+    expect((await validatePackage(directory)).diagnostics.map((d) => d.code)).toContain('OLS_DEPENDENCY_UNLOCKED');
+  });
+
+  it('accepts a custom resolver', async () => {
+    const result = await validatePackage(join(fixtures, 'with-dependency'), undefined, { resolver: () => undefined });
+    expect(result.diagnostics.map((d) => d.code)).toContain('OLS_DEPENDENCY_NOT_FOUND');
+  });
+
+  it('writes the same lockfile that is checked in', async () => {
+    const { lock } = await lockPackage(join(fixtures, 'with-dependency'), { write: false });
+    expect(lock).toEqual(JSON.parse(await readFile(join(fixtures, 'with-dependency/ols.lock.json'), 'utf8')));
+  });
+
+  it('treats ranges as version prefixes', () => {
+    expect(versionSatisfies('1.2.0', '1')).toBe(true);
+    expect(versionSatisfies('1.2.0', '1.2')).toBe(true);
+    expect(versionSatisfies('10.0.0', '1')).toBe(false);
+    expect(versionSatisfies('1.3.0', '1.2')).toBe(false);
   });
 });

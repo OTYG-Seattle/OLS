@@ -82,7 +82,7 @@ export async function loadDocument(source: string): Promise<LoadedDocument> {
 async function jsonFiles(root: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name === 'tests') continue;
+    if (entry.isDirectory() && (entry.name === 'tests' || entry.name === DEFAULT_PACKAGES_DIRECTORY)) continue;
     const path = resolve(root, entry.name);
     if (entry.isDirectory()) files.push(...await jsonFiles(path));
     else if (entry.isFile() && entry.name.endsWith('.json') && !entry.name.endsWith('.expected.json')) files.push(path);
@@ -284,7 +284,85 @@ export function validateTranslationVariants(value: unknown, source: string, poin
   }
 }
 
-export async function validatePackage(root: string, registry?: SchemaRegistry): Promise<ValidationReport> {
+export const LOCKFILE_NAME = 'ols.lock.json';
+/** Default directory, relative to a package root, holding its resolved dependencies (skipped when loading the package itself). */
+export const DEFAULT_PACKAGES_DIRECTORY = 'ols_packages';
+export type LockEntry = { version: string; digest: string; resolved: string };
+/** Returns the directory of a locked dependency, or undefined when it cannot be found. */
+export type DependencyResolver = (name: string, entry: LockEntry, root: string) => Promise<string | undefined> | string | undefined;
+export type PackageValidationOptions = { resolver?: DependencyResolver };
+
+/** Resolves `lock.packages[name].resolved` as a directory relative to the package root. */
+export const filesystemResolver: DependencyResolver = async (_name, entry, root) => {
+  if (!isPackageRelativeUri(entry.resolved)) return undefined;
+  const directory = resolve(root, entry.resolved);
+  try { return (await stat(resolve(directory, 'manifest.ols.json'))).isFile() ? directory : undefined; } catch { return undefined; }
+};
+
+/** Splits a manifest dependency (`name` or `name@range`). */
+export function parseDependency(spec: string): { name: string; range?: string } {
+  const at = spec.indexOf('@');
+  return at < 0 ? { name: spec } : { name: spec.slice(0, at), range: spec.slice(at + 1) };
+}
+
+/** A range is a version prefix: `1` matches 1.x.y, `1.2` matches 1.2.y, `1.2.3` matches exactly. */
+export function versionSatisfies(version: string, range?: string): boolean {
+  if (!range) return true;
+  const have = version.split('.');
+  return range.split('.').every((part, i) => have[i] === part);
+}
+
+const pointerToken = (value: string) => value.replaceAll('~', '~0').replaceAll('/', '~1');
+
+type LoadedDependency = { name: string; version: string; index: Map<string, EntityLocation>; aliases: Record<string, string> };
+
+function entityIndex(documents: LoadedDocument[]): { entities: EntityLocation[]; index: Map<string, EntityLocation> } {
+  const entities: EntityLocation[] = [];
+  for (const document of documents) if (document.data) walk(document.data, document.source, '', entities, []);
+  const index = new Map<string, EntityLocation>();
+  for (const entity of entities) if (!index.has(String(entity.value.id))) index.set(String(entity.value.id), entity);
+  return { entities, index };
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+}
+
+/** Loads every dependency pinned in `ols.lock.json` and checks it against the lock. No lockfile: nothing is resolved. */
+async function loadDependencies(root: string, manifest: Record<string, unknown>, documents: LoadedDocument[], resolver: DependencyResolver, diagnostics: Diagnostic[]): Promise<Map<string, LoadedDependency>> {
+  const loaded = new Map<string, LoadedDependency>();
+  const lockSource = normalizePath(resolve(root, LOCKFILE_NAME));
+  const lock = documents.find((d) => d.source === lockSource)?.data as Record<string, unknown> | undefined;
+  if (!lock) return loaded;
+  const locked = (lock.packages && typeof lock.packages === 'object' ? lock.packages : {}) as Record<string, LockEntry>;
+  const declared = (Array.isArray(manifest.dependencies) ? manifest.dependencies : []).filter((item): item is string => typeof item === 'string').map(parseDependency);
+  for (const { name, range } of declared) {
+    const base = `/packages/${pointerToken(name)}`;
+    const entry = locked[name];
+    const push = (pointer: string, code: string, message: string, severity: Diagnostic['severity'] = 'error') =>
+      diagnostics.push({ layer: 'references', source: lockSource, jsonPointer: pointer, code, message, severity });
+    if (!entry || typeof entry !== 'object') { push('/packages', 'OLS_DEPENDENCY_UNLOCKED', `Dependency ${name} is declared but not locked; run \`ols lock\`.`); continue; }
+    if (!versionSatisfies(String(entry.version), range)) push(`${base}/version`, 'OLS_DEPENDENCY_VERSION_MISMATCH', `Locked version ${entry.version} does not satisfy ${name}@${range}.`);
+    const directory = typeof entry.resolved === 'string' ? await resolver(name, entry, root) : undefined;
+    if (!directory) { push(`${base}/resolved`, 'OLS_DEPENDENCY_NOT_FOUND', `Dependency ${name} could not be found at ${entry.resolved}.`); continue; }
+    const dependencyDocuments = await loadPackage(directory);
+    const dependencyManifest = dependencyDocuments.find((d) => d.source === normalizePath(resolve(directory, 'manifest.ols.json')))?.data as Record<string, unknown> | undefined;
+    if (!dependencyManifest || dependencyManifest.package !== name) { push(base, 'OLS_DEPENDENCY_MISMATCH', `The package at ${entry.resolved} is not ${name}.`); continue; }
+    if (dependencyManifest.version !== entry.version) push(`${base}/version`, 'OLS_DEPENDENCY_VERSION_MISMATCH', `Resolved ${name} is version ${String(dependencyManifest.version)}, but the lock records ${entry.version}.`);
+    const actual = packageDigest(dependencyManifest);
+    if (actual !== entry.digest) push(`${base}/digest`, 'OLS_DEPENDENCY_DIGEST_MISMATCH', `Resolved ${name} has package digest ${actual}, but the lock records ${entry.digest}.`);
+    const { entities, index } = entityIndex(dependencyDocuments);
+    const problems = (await integrityDiagnostics(directory, dependencyDocuments, entities, true)).filter((d) => d.severity === 'error');
+    if (problems.length) push(base, 'OLS_DEPENDENCY_INTEGRITY', `Dependency ${name} failed verification: ${[...new Set(problems.map((d) => d.code))].sort().join(', ')}.`);
+    loaded.set(name, { name, version: String(dependencyManifest.version), index, aliases: stringRecord(dependencyManifest.aliases) });
+  }
+  const declaredNames = new Set(declared.map((item) => item.name));
+  for (const name of Object.keys(locked).sort()) if (!declaredNames.has(name)) diagnostics.push({ layer: 'references', source: lockSource, jsonPointer: `/packages/${pointerToken(name)}`, code: 'OLS_LOCK_ENTRY_UNUSED', message: `Lock entry ${name} is not a declared dependency.`, severity: 'warning' });
+  return loaded;
+}
+
+export async function validatePackage(root: string, registry?: SchemaRegistry, options: PackageValidationOptions = {}): Promise<ValidationReport> {
   const schemas = registry ?? await SchemaRegistry.bundled();
   const documents = await loadPackage(root);
   const diagnostics: Diagnostic[] = [];
@@ -318,12 +396,30 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
   const packageName = manifest ? String(manifest.package ?? '') : undefined;
   const dependencies = manifest?.dependencies as string[] ?? [];
   const isDeclaredDependency = (name: string) => dependencies.some((item) => item.split('@', 1)[0] === name);
+  const dependencyPackages = manifest ? await loadDependencies(absoluteRoot, manifest as Record<string, unknown>, documents, options.resolver ?? filesystemResolver, diagnostics) : new Map<string, LoadedDependency>();
+  const aliases = stringRecord(manifest?.aliases);
+  const manifestSourcePath = normalizePath(resolve(absoluteRoot, 'manifest.ols.json'));
+  for (const [former, current] of Object.entries(aliases)) {
+    if (index.has(former)) diagnostics.push({ layer: 'references', source: manifestSourcePath, jsonPointer: `/aliases/${pointerToken(former)}`, code: 'OLS_ALIAS_SHADOWED', message: `Alias ${former} is also the ID of an entity, so the alias never applies.`, severity: 'error' });
+    if (!index.has(current)) diagnostics.push({ layer: 'references', source: manifestSourcePath, jsonPointer: `/aliases/${pointerToken(former)}`, code: 'OLS_ALIAS_TARGET_UNRESOLVED', message: `Alias ${former} points to ${current}, which does not exist.`, severity: 'error' });
+  }
+  const renamed = (site: ReferenceSite, from: string, to: string) => diagnostics.push({ layer: 'references', source: site.source, jsonPointer: site.pointer, code: 'OLS_ID_RENAMED', message: `${from} was renamed; reference ${to} instead.`, severity: 'warning' });
   const sites = referenceSites(entities, refs);
   for (const site of sites) {
     const { value } = site;
     if (resolveReference(value, index, absoluteRoot, site.source, packageName)) continue;
     const qualified = packageQualifier(value);
+    const localId = qualified ? (qualified.package === packageName ? qualified.local : undefined) : value;
+    if (localId !== undefined && aliases[localId] !== undefined && index.has(aliases[localId]!)) { renamed(site, value, aliases[localId]!); continue; }
     if (manifest && qualified && qualified.package !== packageName) {
+      const dependency = dependencyPackages.get(qualified.package);
+      if (dependency) {
+        if (dependency.index.has(qualified.local)) continue;
+        const target = dependency.aliases[qualified.local];
+        if (target !== undefined && dependency.index.has(target)) { renamed(site, value, `${qualified.package}:${target}`); continue; }
+        diagnostics.push({ layer: 'references', source: site.source, jsonPointer: site.pointer, code: 'OLS_REF_UNRESOLVED', message: `${qualified.local} is not defined by dependency ${qualified.package}@${dependency.version}.`, severity: 'error' });
+        continue;
+      }
       // Undeclared packages are reported as OLS_DEPENDENCY_UNDECLARED below.
       if (isDeclaredDependency(qualified.package)) diagnostics.push({ layer: 'references', source: site.source, jsonPointer: site.pointer, code: 'OLS_REF_EXTERNAL', message: `Reference ${value} targets dependency ${qualified.package} and was not resolved locally.`, severity: 'info' });
       continue;
@@ -520,6 +616,48 @@ export async function packPackage(root: string, options: { write?: boolean } = {
   manifest.digest = packageDigest(manifest);
   if (options.write !== false) await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
+}
+
+/**
+ * Writes `ols.lock.json`, pinning every declared dependency found under `packagesDirectory`
+ * (default `ols_packages/<name>`) to its version and package digest. Each dependency must already
+ * be packed and pass `verifyPackage`. Adds the lockfile to `manifest.files` when that list exists.
+ */
+export async function lockPackage(root: string, options: { packagesDirectory?: string; write?: boolean } = {}): Promise<{ lock: Record<string, unknown>; manifestUpdated: boolean }> {
+  const absoluteRoot = resolve(root);
+  const packagesDirectory = normalizePath(options.packagesDirectory ?? DEFAULT_PACKAGES_DIRECTORY);
+  const manifestPath = resolve(absoluteRoot, 'manifest.ols.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+  const packages: Record<string, LockEntry> = {};
+  for (const spec of (Array.isArray(manifest.dependencies) ? manifest.dependencies : []) as string[]) {
+    const { name, range } = parseDependency(spec);
+    const resolved = `${packagesDirectory}/${name}`;
+    const directory = resolve(absoluteRoot, resolved);
+    let dependency: Record<string, unknown>;
+    try { dependency = JSON.parse(await readFile(resolve(directory, 'manifest.ols.json'), 'utf8')); }
+    catch { throw new Error(`Dependency ${name} was not found at ${resolved}.`); }
+    if (dependency.package !== name) throw new Error(`The package at ${resolved} is ${String(dependency.package)}, not ${name}.`);
+    if (!versionSatisfies(String(dependency.version), range)) throw new Error(`${name} ${String(dependency.version)} does not satisfy ${spec}.`);
+    const verification = await verifyPackage(directory);
+    if (!verification.valid) throw new Error(`Dependency ${name} does not verify; run \`ols pack\` in it (${[...new Set(verification.diagnostics.map((d) => d.code))].join(', ')}).`);
+    packages[name] = { version: String(dependency.version), digest: String(dependency.digest), resolved };
+  }
+  const lock = {
+    $schema: 'https://ols.otyg.org/schema/v1.0/lock.schema.json',
+    ols_version: typeof manifest.ols_version === 'string' ? manifest.ols_version : '1.1.0',
+    type: 'lock',
+    packages: Object.fromEntries(Object.entries(packages).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+  };
+  let manifestUpdated = false;
+  if (Array.isArray(manifest.files) && !manifestFileEntries(manifest.files).some((entry) => entry.path === LOCKFILE_NAME)) {
+    manifest.files = [...manifest.files, LOCKFILE_NAME];
+    manifestUpdated = true;
+  }
+  if (options.write !== false) {
+    await writeFile(resolve(absoluteRoot, LOCKFILE_NAME), `${JSON.stringify(lock, null, 2)}\n`);
+    if (manifestUpdated) await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+  return { lock, manifestUpdated };
 }
 
 export async function runSelfTests(root: string): Promise<ValidationReport> {

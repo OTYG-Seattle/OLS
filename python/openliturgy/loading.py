@@ -7,6 +7,9 @@ from typing import Any, Optional, Union
 
 from .models import OlsDocument
 
+DEFAULT_PACKAGES_DIRECTORY = "ols_packages"
+"""Directory, relative to a package root, holding its resolved dependencies (skipped when loading the package)."""
+
 
 @dataclass(frozen=True)
 class LoadedDocument:
@@ -41,7 +44,8 @@ def load_package(root: Union[str, Path]) -> list[LoadedDocument]:
     files = sorted(
         path
         for path in directory.rglob("*.json")
-        if "tests" not in path.relative_to(directory).parts and not path.name.endswith(".expected.json")
+        if not {"tests", DEFAULT_PACKAGES_DIRECTORY} & set(path.relative_to(directory).parent.parts)
+        and not path.name.endswith(".expected.json")
     )
     manifest = directory / "manifest.ols.json"
     files.sort(key=lambda path: (path != manifest, path.as_posix()))

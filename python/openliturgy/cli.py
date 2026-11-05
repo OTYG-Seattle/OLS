@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import List, Optional
 
 from .schemas import SchemaRegistry
-from .validation import LAYERS, pack_package, run_self_tests, validate_document, validate_package, verify_package
+from .validation import (
+    LAYERS,
+    lock_package,
+    pack_package,
+    run_self_tests,
+    validate_document,
+    validate_package,
+    verify_package,
+)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -24,6 +32,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     pack = commands.add_parser("pack")
     pack.add_argument("path")
     pack.add_argument("--stdout", action="store_true")
+    lock = commands.add_parser("lock")
+    lock.add_argument("path")
+    lock.add_argument("--packages-dir", default="ols_packages")
+    lock.add_argument("--stdout", action="store_true")
     schemas = commands.add_parser("schemas")
     schema_commands = schemas.add_subparsers(dest="schema_command", required=True)
     refresh = schema_commands.add_parser("refresh")
@@ -34,6 +46,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             SchemaRegistry.bundled().refresh(args.cache)
             return 0
         path = Path(args.path).resolve()
+        if args.command == "lock":
+            lockfile, manifest_updated = lock_package(path, args.packages_dir, write=not args.stdout)
+            if args.stdout:
+                print(json.dumps(lockfile, indent=2, ensure_ascii=False))
+            else:
+                note = " Added ols.lock.json to manifest files; run `ols pack` to re-pin." if manifest_updated else ""
+                print(f"Locked {len(lockfile['packages'])} dependencies.{note}")
+            return 0
         if args.command == "pack":
             manifest = pack_package(path, write=not args.stdout)
             print(json.dumps(manifest, indent=2, ensure_ascii=False) if args.stdout else manifest["digest"])

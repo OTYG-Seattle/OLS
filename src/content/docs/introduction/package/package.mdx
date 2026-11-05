@@ -101,7 +101,7 @@ The section can refer to the block by a stable ID:
 }
 ```
 
-Package processors should load the manifest first, resolve declared dependencies, index IDs, and only then resolve cross-file references. This makes failures such as a missing `block-kyrie` deterministic and easy to report.
+Package processors should load the manifest first, resolve declared dependencies (pinned in `ols.lock.json`, see [Dependencies & Lockfile](/advanced-profiles/distribution/dependencies)), index IDs, and only then resolve cross-file references. This makes failures such as a missing `block-kyrie` deterministic and easy to report.
 
 ## Package-Level Defaults
 

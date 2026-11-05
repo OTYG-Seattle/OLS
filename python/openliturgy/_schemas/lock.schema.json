@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ols.otyg.org/schema/v1.0/lock.schema.json",
+  "title": "OLS Dependency Lock",
+  "description": "Pins each declared dependency of a package to an exact version and package digest. Written by `ols lock`.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "const": "https://ols.otyg.org/schema/v1.0/lock.schema.json"
+    },
+    "ols_version": {
+      "type": "string",
+      "pattern": "^1\\.[01]\\.[0-9]+$"
+    },
+    "type": {
+      "const": "lock"
+    },
+    "packages": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/PackageName"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "digest": {
+            "$ref": "#/$defs/Digest"
+          },
+          "resolved": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Where the dependency was resolved from: a path relative to the package root, or a URI."
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "resolved"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "ols_version",
+    "type",
+    "packages"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "PackageName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "x-ols-schema-source": "normative",
+  "x-ols-specification": "https://ols.otyg.org/schema/v1.0/lock.schema.json",
+  "x-ols-revision": "1.2.0"
+}

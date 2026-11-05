@@ -77,11 +77,17 @@
     "revision": "1.0.0",
     "sha256": "705628f72d52e33a33956d70ee70e648fc6eac171d4c3c6f90c30faba5b06630"
   },
+  "lock.schema.json": {
+    "source": "normative",
+    "specification": "https://ols.otyg.org/schema/v1.0/lock.schema.json",
+    "revision": "1.2.0",
+    "sha256": "3311fbf0c0a9e841b67713894b29c0edf31b97cc13a487a25b642844c1c77f2f"
+  },
   "manifest.schema.json": {
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
     "revision": "1.0.0",
-    "sha256": "1b431c18af9d05de4b0b75848e30e68578cd23898fac700a240b7bd6d6b36c01"
+    "sha256": "c1fbcb49b3f1f1a863bb3ffbde088f5a61bc3c55abdb52a7a6ba84030cedf5fd"
   },
   "mutation.schema.json": {
     "source": "synthesized",

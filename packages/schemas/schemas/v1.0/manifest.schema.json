@@ -73,7 +73,8 @@
     "dependencies": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(@[0-9]+(\\.[0-9]+){0,2})?$"
       },
       "uniqueItems": true
     },
@@ -108,6 +109,16 @@
     "digest": {
       "$ref": "#/$defs/Digest",
       "description": "Digest of the canonical manifest without digest and signatures. Written by `ols pack`."
+    },
+    "aliases": {
+      "type": "object",
+      "description": "Renamed IDs: maps a former entity ID to its current ID so existing references keep resolving.",
+      "propertyNames": {
+        "$ref": "#/$defs/Id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Id"
+      }
     }
   },
   "required": [

@@ -62,7 +62,7 @@ Validators resolve every `$ref` with the same rules, in this order:
 3. **File path.** A reference containing `/` or ending in `.json` resolves to a document inside the package root. Paths that escape the root report `OLS_REF_PATH_ESCAPE`.
 4. **Package-qualified ID.** `<package>:<id>` splits at the first `:`.
    - If `<package>` is this package's manifest `package`, `<id>` is looked up locally.
-   - If `<package>` is a declared dependency, the reference is **never** satisfied by a local entity with the same `<id>`. Validators report `OLS_REF_EXTERNAL` (info) until dependency resolution is available.
+   - If `<package>` is a declared dependency, the reference is **never** satisfied by a local entity with the same `<id>`. When the package has an `ols.lock.json`, validators load the locked dependency and resolve `<id>` in it (see [Dependencies & Lockfile](/advanced-profiles/distribution/dependencies)); otherwise they report `OLS_REF_EXTERNAL` (info).
    - Otherwise the validator reports `OLS_DEPENDENCY_UNDECLARED` (error).
 
 Anything else reports `OLS_REF_UNRESOLVED`.
@@ -76,4 +76,14 @@ The same rules apply to fields whose value is an ID of another entity, not only 
 
 ## Renames and Versions
 
-Changing a label, translation, or file location does not require a new ID. When an ID itself must change, publishers should retain a redirect or alias in package metadata so old references can be diagnosed or migrated. A breaking structural revision should update the entity or package version while preserving the stable identity whenever it still represents the same liturgical object.
+Changing a label, translation, or file location does not require a new ID. When an ID itself must change, publishers record the old ID in the manifest's `aliases` so existing references keep resolving:
+
+```json
+{
+  "type": "manifest",
+  "package": "org.openliturgy.eotc.core",
+  "aliases": { "block-kyrie-old": "block-kyrie" }
+}
+```
+
+A reference to an alias, whether local (`block-kyrie-old`) or from another package (`org.openliturgy.eotc.core:block-kyrie-old`), resolves to the current entity with an `OLS_ID_RENAMED` warning that names the new ID. An alias that is also a live entity ID reports `OLS_ALIAS_SHADOWED`. An alias whose target does not exist reports `OLS_ALIAS_TARGET_UNRESOLVED`. A breaking structural revision should update the entity or package version while preserving the stable identity whenever it still represents the same liturgical object.

@@ -1,0 +1,104 @@
+---
+title: 'Dependencies & Lockfile'
+description: 'Declaring, locking, and resolving package dependencies, and keeping references working across ID renames.'
+category: 'distribution'
+order: 42
+updatedAt: 2026-11-05
+---
+
+Liturgical content is layered: a parish package reuses a jurisdiction's common texts, which reuse a shared Psalter. OLS packages declare those dependencies in the manifest, pin them in a lockfile, and reference their entities with package-qualified IDs.
+
+## Declaring Dependencies
+
+```json
+{
+  "type": "manifest",
+  "package": "org.openliturgy.parish",
+  "dependencies": ["org.openliturgy.eotc.core@1", "org.openliturgy.common.psalter@2.1"]
+}
+```
+
+A dependency is `name` or `name@range`. A range is a version **prefix**:
+
+| Range        | Matches             |
+| ------------ | ------------------- |
+| `name@1`     | `1.0.0`, `1.4.2`, … |
+| `name@1.2`   | `1.2.0`, `1.2.9`, … |
+| `name@1.2.3` | exactly `1.2.3`     |
+| `name`       | any version         |
+
+Reference a dependency's entity as `<package>:<id>`, for example `org.openliturgy.eotc.core:block-kyrie`. A local entity with the same `<id>` never satisfies such a reference.
+
+## The Lockfile
+
+`ols.lock.json` records exactly which release of each dependency the package was built against: its version, its [package digest](/advanced-profiles/distribution/integrity), and where it was resolved from.
+
+```json
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/lock.schema.json",
+  "ols_version": "1.1.0",
+  "type": "lock",
+  "packages": {
+    "org.openliturgy.dep": {
+      "version": "1.2.0",
+      "digest": "sha256:459d65c184950f62782e041f0e95bc4180e83b3e7f4a3f7326f79c03c0d5761d",
+      "resolved": "ols_packages/org.openliturgy.dep"
+    }
+  }
+}
+```
+
+The lockfile is a package document: list it in `manifest.files` and it is pinned by `ols pack` like any other file. Consumers therefore receive the exact dependency digests the publisher reviewed.
+
+## Workflow
+
+```bash
+# place each dependency (already packed by its publisher) under ols_packages/<name>
+ols lock ./parish-package      # write ols.lock.json (adds it to manifest.files)
+ols pack ./parish-package      # re-pin, now including the lockfile
+ols validate ./parish-package  # resolves org.openliturgy.dep:… references
+```
+
+`ols lock` refuses a dependency that does not satisfy its range or does not pass `ols verify`. `ols_packages/` is never loaded as part of the package itself.
+
+## Resolution
+
+With a lockfile present, validation loads every locked dependency and checks it before resolving references into it:
+
+| Code                              | Severity | Meaning                                                              |
+| --------------------------------- | -------- | -------------------------------------------------------------------- |
+| `OLS_DEPENDENCY_UNLOCKED`         | error    | A declared dependency has no lock entry.                             |
+| `OLS_DEPENDENCY_NOT_FOUND`        | error    | The locked location does not hold a package.                         |
+| `OLS_DEPENDENCY_MISMATCH`         | error    | The package found there has a different `package` name.              |
+| `OLS_DEPENDENCY_VERSION_MISMATCH` | error    | The locked or resolved version does not match the range or the lock. |
+| `OLS_DEPENDENCY_DIGEST_MISMATCH`  | error    | The resolved package digest differs from the lock.                   |
+| `OLS_DEPENDENCY_INTEGRITY`        | error    | The resolved package fails `ols verify`.                             |
+| `OLS_LOCK_ENTRY_UNUSED`           | warning  | The lock lists a package that is not a declared dependency.          |
+
+A reference into a resolved dependency either resolves, resolves through one of the dependency's [aliases](/specification/introduction/ids) with `OLS_ID_RENAMED`, or reports `OLS_REF_UNRESOLVED`. Without a lockfile, references into declared dependencies report `OLS_REF_EXTERNAL` (info) and are not checked.
+
+The SDKs resolve `resolved` paths relative to the package root by default. Applications that fetch packages from a registry or cache pass their own resolver:
+
+```ts
+await validatePackage('./parish-package', undefined, {
+  resolver: async (name, entry) => cache.directoryFor(name, entry.digest),
+});
+```
+
+```python
+validate_package("./parish-package", resolver=lambda name, entry, root: cache.directory_for(name, entry["digest"]))
+```
+
+## Renamed IDs
+
+When an entity's ID must change, keep the old ID as an alias in the manifest so dependents keep working while they migrate:
+
+```json
+{
+  "type": "manifest",
+  "package": "org.openliturgy.dep",
+  "aliases": { "block-kyrie-old": "block-kyrie" }
+}
+```
+
+`org.openliturgy.dep:block-kyrie-old` still resolves, with a warning telling the dependent to reference `org.openliturgy.dep:block-kyrie`.
