@@ -5,6 +5,7 @@ from pathlib import Path
 from openliturgy.integrity import canonical_digest, canonicalize
 from openliturgy.models import ValidationReport
 from openliturgy.references import resolve_reference
+from openliturgy.schemas import load_context
 from openliturgy.validation import (
     lock_package,
     pack_package,
@@ -254,3 +255,11 @@ def test_version_ranges_are_prefixes() -> None:
     assert version_satisfies("1.2.0", "1.2")
     assert not version_satisfies("10.0.0", "1")
     assert not version_satisfies("1.3.0", "1.2")
+
+
+def test_load_context_matches_published_context() -> None:
+    published = json.loads(
+        (FIXTURES.parent / "packages/schemas/schemas/v1.0/context.jsonld").read_text(encoding="utf-8")
+    )
+    assert load_context() == published
+    assert load_context()["@context"]["id"] == "@id"

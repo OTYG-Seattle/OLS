@@ -44,6 +44,28 @@
     "byteSize": {
       "type": "integer",
       "minimum": 0
+    },
+    "iiif": {
+      "type": "object",
+      "description": "IIIF Presentation API location of the image this asset depicts.",
+      "properties": {
+        "manifest": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+$"
+        },
+        "canvas": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+$"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^(full|square|(pct:)?[0-9.]+,[0-9.]+,[0-9.]+,[0-9.]+)$"
+        }
+      },
+      "required": [
+        "manifest"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

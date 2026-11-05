@@ -33,6 +33,15 @@
     },
     "privacy": {
       "type": "object"
+    },
+    "sameAs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+$"
+      },
+      "uniqueItems": true,
+      "description": "The same person, organization, or work in an external authority (Wikidata, VIAF, ORCID, ISNI, …)."
     }
   },
   "required": [

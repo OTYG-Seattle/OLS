@@ -1,0 +1,9 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/citation.schema.json",
+  "ols_version": "1.1.0",
+  "type": "citation",
+  "id": "src-mashafa-qeddase",
+  "kind": "printed-book",
+  "title": "Mäṣḥafä Qeddase",
+  "sameAs": ["https://authority.example.org/works/mashafa-qeddase"]
+}

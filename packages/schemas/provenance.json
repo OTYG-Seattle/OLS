@@ -3,7 +3,7 @@
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/asset.schema.json",
     "revision": "1.0.0",
-    "sha256": "e47107cc9df836c97a2ecf91e6372c9187ebdf8164c796901ba11d77deee984a"
+    "sha256": "39bffc776e47c596be8cd2a096bca9e2e62720ce2772265532411b74768e1b86"
   },
   "authority.schema.json": {
     "source": "synthesized",
@@ -23,6 +23,12 @@
     "revision": "1.0.0",
     "sha256": "e597e2a61d7918afc37f5446303eac76ddc87ceb6703aafe20349b97cb5d0577"
   },
+  "catalog.schema.json": {
+    "source": "normative",
+    "specification": "https://ols.otyg.org/schema/v1.0/catalog.schema.json",
+    "revision": "1.2.0",
+    "sha256": "5e5a09f248d7f645be7c11043bf5afd9cc83f46d1aec4c3d0b97c07a62665236"
+  },
   "chant.schema.json": {
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/chant.schema.json",
@@ -33,7 +39,7 @@
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/citation.schema.json",
     "revision": "1.0.0",
-    "sha256": "ad1bf1d9c9ffdb5a8e1fe0e530d03db4e6909e99be76518ea80c79781a8f4ee1"
+    "sha256": "cfc6df2a17d04a3c4841d7d3fef5785cba62d0105adce9b0c212ad9ae9d7f0bc"
   },
   "conflict-rule.schema.json": {
     "source": "synthesized",
@@ -51,7 +57,7 @@
     "source": "normative",
     "specification": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
     "revision": "1.0.0",
-    "sha256": "ffdd7fe184d57ae1377590628b0b9e74bd8d23c9975927d367adf179c87105ef"
+    "sha256": "307019f83d1f2ca806c203e062e849406bbc53a3fb7846102e9d8e14c309f408"
   },
   "execution-timeline.schema.json": {
     "source": "synthesized",
@@ -105,13 +111,13 @@
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/organization.schema.json",
     "revision": "1.0.0",
-    "sha256": "d20261afe8d9b2360c821fa6bf237815bc91acfcae8083288422b7874daedbd5"
+    "sha256": "418096520ca5f6aee7904a689ff8e6691e3760b384c4a90d746f3657a88b4860"
   },
   "person.schema.json": {
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/person.schema.json",
     "revision": "1.0.0",
-    "sha256": "c0f18781c430fa486a74884cf8b699fff9e1ffb961bf8582e1dc858a57efd520"
+    "sha256": "4828dcab09e6111df6b66e14a580ab9e7f56468e5a0ccefa3644d038dbabb3a5"
   },
   "proper-slot.schema.json": {
     "source": "synthesized",

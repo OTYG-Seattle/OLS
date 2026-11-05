@@ -10,6 +10,14 @@ from typing import Any
 from jsonschema.validators import Draft202012Validator
 
 
+def load_context() -> dict[str, Any]:
+    """The OLS JSON-LD context (``@context`` document) that maps OLS JSON to linked data."""
+    context: dict[str, Any] = json.loads(
+        Path(__file__).with_name("_schemas").joinpath("context.jsonld").read_text(encoding="utf-8")
+    )
+    return context
+
+
 class SchemaRegistry:
     def __init__(self, schemas: dict[str, dict[str, Any]]) -> None:
         self.schemas = schemas

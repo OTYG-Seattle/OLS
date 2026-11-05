@@ -1,0 +1,114 @@
+---
+title: 'Linked Data & Discovery'
+description: 'The OLS JSON-LD context, links to external authorities, IIIF images, the PROV-O provenance mapping, and publisher catalogs.'
+category: 'distribution'
+order: 43
+updatedAt: 2026-11-05
+---
+
+OLS documents are plain JSON for applications, but archives, library catalogs, and research tools work with linked data. OLS publishes a JSON-LD context so that every OLS document can also be read as RDF without changing a byte of it.
+
+## The JSON-LD Context
+
+The context lives at [`/schema/v1.0/context.jsonld`](/schema/v1.0/context.jsonld) and ships in `@openliturgy/schemas` (`loadContext()`) and the Python package (`openliturgy.schemas.load_context()`). Apply it in either of two ways:
+
+- **In the document**: add `"@context": "https://ols.otyg.org/schema/v1.0/context.jsonld"`. Validators ignore it.
+- **Out of band**: serve OLS JSON with an HTTP `Link: <https://ols.otyg.org/schema/v1.0/context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"` header, or pass the context to your JSON-LD processor.
+
+| OLS JSON                                               | Linked data                                                                      |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `id`, and `$ref` objects                               | `@id`: the entity, or a reference to it.                                         |
+| `type`                                                 | `@type` in the OLS vocabulary (`https://ols.otyg.org/vocab#`).                   |
+| `kind`                                                 | A vocabulary term, e.g. `ols:gospel`.                                            |
+| `label`, `title`, `name`, `text`, `summary`, `notes`   | Language-tagged literals (`rdfs:label`, `dcterms:title`, …), one per BCP 47 key. |
+| ID fields (`blocks`, `roles`, `ordo`, `linkedTo`, …)   | Links to the referenced entities.                                                |
+| `license`, `version`, `publisher`, `mediaType`         | `dcterms:license`, `schema:version`, `dcterms:publisher`, `dcterms:format`.      |
+| `sameAs`                                               | `owl:sameAs`.                                                                    |
+| `variants`, `conditions`, `mutations`, `traditions`, … | JSON literals (`@json`), preserved exactly.                                      |
+
+Expanded output may lowercase language tags (`en-US` becomes `en-us`); BCP 47 tags compare case-insensitively. IDs are resolved against the document's base IRI, so publishers who need globally dereferenceable identifiers should serve packages from stable URLs or set `@base`.
+
+## Linking to External Authorities
+
+Citations, people, and organizations accept `sameAs`: absolute URIs for the same work, person, or body in an external authority such as Wikidata, VIAF, ISNI, or ORCID.
+
+```json
+{
+  "type": "citation",
+  "id": "src-mashafa-qeddase",
+  "kind": "printed-book",
+  "title": "Mäṣḥafä Qeddase",
+  "sameAs": ["https://authority.example.org/works/mashafa-qeddase"]
+}
+```
+
+<Callout tone="warning" title="Only link public identities">
+  Do not add `sameAs` links for people whose `privacy` settings keep their identity private. An authority link can
+  disclose more than the record that carries it.
+</Callout>
+
+## IIIF Images
+
+Manuscript and scan assets can point to an image on any [IIIF](https://iiif.io/) server rather than copying it into the package. `iiif.manifest` is required; `canvas` selects a page and `region` (IIIF Image API syntax) a part of it.
+
+```json
+{
+  "type": "asset",
+  "id": "asset-ms-folio-12r",
+  "kind": "manuscript-image",
+  "uri": "https://iiif.example.org/iiif/ms-123/f12r/full/max/0/default.jpg",
+  "linkedTo": "ut-anaphora-opening",
+  "iiif": {
+    "manifest": "https://iiif.example.org/iiif/ms-123/manifest.json",
+    "canvas": "https://iiif.example.org/iiif/ms-123/canvas/f12r",
+    "region": "120,480,1600,420"
+  }
+}
+```
+
+## Provenance and PROV-O
+
+OLS [provenance](/specification/metadata-authority/source) fields correspond to the W3C [PROV-O](https://www.w3.org/TR/prov-o/) ontology. The context maps `source` to `prov:wasDerivedFrom` and an asset's `provenance` to `prov:wasGeneratedBy`. The people involved map as follows:
+
+| OLS field              | PROV-O reading                                                                |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `source`               | The entity `prov:wasDerivedFrom` the cited source.                            |
+| `sourceStatus`         | The kind of `prov:Activity` (transcription, translation, …) that produced it. |
+| `transcriber`          | `prov:wasAttributedTo` that person, in the role of transcriber.               |
+| `translator`           | `prov:wasAttributedTo` that person, in the role of translator.                |
+| `editors`, `reviewers` | `prov:wasAttributedTo` each person, in the role of editor or reviewer.        |
+| `lastReviewed`         | `prov:endedAtTime` of the latest review activity.                             |
+| `changeReason`         | Description of the activity (`prov:Activity` + `rdfs:comment`).               |
+
+OLS keeps the role-specific names (`ols:transcriber`, `ols:translator`, …). Each one is a specialization of `prov:wasAttributedTo`, so PROV-aware tools can treat them all as attribution.
+
+## Publisher Catalogs
+
+A publisher lists its packages at `/.well-known/openliturgy.json` with a `catalog` document. Each released version carries the package digest from `ols pack`, so a consumer can find a package, download it, check it with `ols verify`, and record it in `ols.lock.json`.
+
+```json
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/catalog.schema.json",
+  "ols_version": "1.1.0",
+  "type": "catalog",
+  "publisher": { "name": "OpenLiturgy demo publisher", "url": "https://example.org/" },
+  "updated": "2026-11-05T12:00:00Z",
+  "packages": [
+    {
+      "package": "org.openliturgy.integrity-demo",
+      "title": { "en": "Integrity demo package" },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "digest": "sha256:0981af841724d4fa0bd3618bd7d24b14aeb73ad70c38093ea8e09cba5d817cc9",
+          "url": "https://example.org/packages/org.openliturgy.integrity-demo/1.0.0/",
+          "published": "2026-11-05",
+          "status": "current"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Mark a version `withdrawn` (for example, after an error was found in the text) rather than deleting it, so consumers that locked it can discover why it disappeared.

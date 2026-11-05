@@ -26,6 +26,8 @@ For portable packages, processors should resolve relative URIs from the package 
 
 Pin package-local files with `digest` (a `sha256:` digest of the raw bytes), `byteSize`, and `mediaType` so consumers can detect a corrupted or substituted file. See [Integrity & Canonical Form](/advanced-profiles/distribution/integrity).
 
+Manuscript images can reference a page or region on a IIIF server with `iiif.manifest`, `iiif.canvas`, and `iiif.region` instead of copying the image into the package. See [Linked Data & Discovery](/advanced-profiles/distribution/linked-data).
+
 Record enough metadata to distinguish a demonstration from an authoritative source. At minimum, document the media type, rights or license, provenance, and the entity being illustrated. For audio and video, timeline bindings can connect service entities to exact segments without splitting the media into many files.
 
 <Callout tone="warning" title="Media can identify people">

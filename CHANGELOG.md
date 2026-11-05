@@ -16,6 +16,11 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Dependency ranges (`name@1`, `name@1.2`, `name@1.2.3`) are version prefixes. `parseDependency` and `versionSatisfies` are exported, and the manifest schema now constrains the format.
 - **ID aliases.** `manifest.aliases` maps renamed IDs to current ones. References through an alias resolve with an `OLS_ID_RENAMED` warning, including references into a dependency. Broken aliases report `OLS_ALIAS_SHADOWED` or `OLS_ALIAS_TARGET_UNRESOLVED`.
 - `ols_packages/` directories are skipped when loading a package, like `tests/`.
+- **JSON-LD context** at `/schema/v1.0/context.jsonld`, shipped in `@openliturgy/schemas` (`loadContext()`) and Python (`load_context()`). It maps `id` and `$ref` to `@id`, `type` to `@type`, localized text to language maps, ID-valued fields to node references, and opaque structures to `@json` literals. An SDK test expands every fixture with a real JSON-LD processor.
+- `sameAs` (absolute URIs) on citations, people, and organizations, for links to Wikidata, VIAF, ISNI, ORCID, and similar authorities.
+- `iiif` on assets (`manifest`, `canvas`, `region`) for manuscript images served by IIIF.
+- `catalog` document type (`catalog.schema.json`) for a publisher's `/.well-known/openliturgy.json`, listing every package version with its digest and status.
+- *Linked Data & Discovery* article covering the context, external authorities, IIIF, the PROV-O mapping, and catalogs.
 - New *Sharing & Distribution* docs category with an *Integrity & Canonical Form* article.
 - `npm run schemas:provenance` recomputes schema provenance digests and syncs the Python schema copy.
 
