@@ -13,7 +13,8 @@ A `Role` is a liturgical function. A `RoleGroup` is an addressable ensemble such
 ```json
 {
   "id": "role-deacon",
-  "type": "deacon",
+  "type": "role",
+  "kind": "deacon",
   "labels": {
     "en": "Deacon",
     "am-Ethi": "ዲያቆን",
@@ -33,9 +34,9 @@ A `Role` is a liturgical function. A `RoleGroup` is an addressable ensemble such
 }
 ```
 
-## Core Role Types
+## Core Role Kinds
 
-| Type           | Meaning                         | Examples                            |
+| Kind           | Meaning                         | Examples                            |
 | -------------- | ------------------------------- | ----------------------------------- |
 | `bishop`       | Presiding hierarch.             | Abune, bishop.                      |
 | `celebrant`    | Presiding priest.               | Priest serving Kidase.              |

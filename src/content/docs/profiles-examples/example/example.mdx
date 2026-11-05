@@ -10,7 +10,7 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
 
 ```json
 {
-  "$schema": "https://ols.otyg.org/schema/v1.1/corpus.schema.json",
+  "$schema": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
   "ols_version": "1.1.0",
   "type": "corpus",
   "id": "eotc-kidase-demo-v1",
@@ -18,6 +18,7 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
     "title": { "en": "EOTC Kidase Demo Corpus" }
   },
   "authority": {
+    "type": "authority",
     "status": "educational-only",
     "allowedUse": ["education", "private-study"],
     "restrictedUse": ["altar-use"],
@@ -26,19 +27,22 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
   "roles": [
     {
       "id": "role-deacon",
-      "type": "deacon",
+      "type": "role",
+      "kind": "deacon",
       "labels": { "en": "Deacon" }
     },
     {
       "id": "role-congregation",
-      "type": "congregation",
+      "type": "role",
+      "kind": "congregation",
       "labels": { "en": "Congregation" }
     }
   ],
   "readings": [
     {
       "id": "reading-john-1-1-5",
-      "type": "gospel",
+      "type": "reading",
+      "kind": "gospel",
       "role": "role-deacon",
       "reference": {
         "system": "osis",
@@ -49,7 +53,8 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
   "blocks": [
     {
       "id": "block-kyrie",
-      "type": "response",
+      "type": "block",
+      "kind": "response",
       "elements": [
         {
           "utterance": {
@@ -62,9 +67,23 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
             },
             "variants": {
               "en": [
-                { "value": "Lord, have mercy.", "label": "EOTC Official", "source": "EOTC English Missal 2019", "default": true },
-                { "value": "O Lord, show mercy.", "label": "Diaspora Prayer Book", "source": "St. Mary Cathedral, LA, 2021" },
-                { "value": "Lord, be merciful to us.", "label": "Scholarly Literal", "source": "Getatchew Haile, CSCO vol. 542", "register": "scholarly" }
+                {
+                  "value": "Lord, have mercy.",
+                  "label": "EOTC Official",
+                  "source": "EOTC English Missal 2019",
+                  "default": true
+                },
+                {
+                  "value": "O Lord, show mercy.",
+                  "label": "Diaspora Prayer Book",
+                  "source": "St. Mary Cathedral, LA, 2021"
+                },
+                {
+                  "value": "Lord, be merciful to us.",
+                  "label": "Scholarly Literal",
+                  "source": "Getatchew Haile, CSCO vol. 542",
+                  "register": "scholarly"
+                }
               ]
             }
           }
@@ -81,7 +100,8 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
     },
     {
       "id": "block-gospel",
-      "type": "reading-block",
+      "type": "block",
+      "kind": "reading-block",
       "elements": [{ "$ref": "reading-john-1-1-5" }]
     }
   ],
@@ -90,22 +110,25 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
       "id": "sec-liturgy-of-word",
       "type": "section",
       "label": { "en": "Liturgy of the Word" },
-      "blocks": [{ "$ref": "block-kyrie" }, { "$ref": "block-gospel" }]
+      "blocks": ["block-kyrie", "block-gospel"]
     }
   ],
   "ordos": [
     {
       "id": "ordo-kidase-demo",
-      "type": "eucharist",
+      "type": "ordo",
+      "kind": "eucharist",
       "tradition": "eotc",
       "label": { "en": "Kidase Demo" },
-      "sections": [{ "$ref": "sec-liturgy-of-word" }],
+      "sections": ["sec-liturgy-of-word"],
       "properSlots": ["gospel-of-the-day"]
     }
   ],
   "propers": [
     {
       "id": "proper-demo-feast",
+      "type": "proper",
+      "ordos": ["ordo-kidase-demo"],
       "priority": 10,
       "priorityClass": "commemoration",
       "conditions": {
@@ -117,20 +140,20 @@ This minimal example shows the core v1.0 pattern: schema header, metadata, autho
       },
       "fills": {
         "gospel-of-the-day": { "$ref": "reading-john-1-1-5" }
-      }
+      },
+      "mutations": []
     }
   ],
   "teachingNotes": [
     {
       "id": "teaching-kyrie",
+      "type": "teaching-note",
       "target": "block-kyrie",
-      "teaching": {
-        "summary": {
-          "en": "This response asks for God’s mercy."
-        },
-        "bibleLinks": ["Heb.4.16"],
-        "ageLevel": "general"
-      }
+      "summary": {
+        "en": "This response asks for God’s mercy."
+      },
+      "bibleLinks": ["Heb.4.16"],
+      "ageLevel": "general"
     }
   ]
 }

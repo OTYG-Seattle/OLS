@@ -6,7 +6,7 @@ from typing import Any, Iterable, Optional, Union
 
 from .loading import LoadedDocument, load_document, load_package
 from .models import Diagnostic, Layer, ValidationReport
-from .references import resolve_reference
+from .references import package_qualifier, resolve_reference
 from .schemas import SchemaRegistry
 
 LAYERS: list[Layer] = ["parse", "schema-selection", "structural", "consistency", "references", "semantic"]
@@ -289,19 +289,44 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                     severity="warning",
                 )
             )
+    manifest = next(
+        (doc.raw for doc in documents if isinstance(doc.raw, dict) and doc.raw.get("type") == "manifest"), None
+    )
+    package_name = str(manifest.get("package", "")) if isinstance(manifest, dict) else None
+    dependencies = manifest.get("dependencies", []) if isinstance(manifest, dict) else []
+
+    def is_declared_dependency(name: str) -> bool:
+        return any(item.split("@", 1)[0] == name for item in dependencies)
+
     for reference in refs:
         target = reference["value"]["$ref"]
-        if resolve_reference(target, index, directory, reference["source"]) is None:
-            diagnostics.append(
-                Diagnostic(
-                    layer="references",
-                    source=reference["source"],
-                    jsonPointer=reference["pointer"] + "/$ref",
-                    code="OLS_REF_PATH_ESCAPE" if ".." in target else "OLS_REF_UNRESOLVED",
-                    message=f"Reference {target} could not be resolved.",
-                    severity="error",
+        if resolve_reference(target, index, directory, reference["source"], package_name) is not None:
+            continue
+        qualified = package_qualifier(target)
+        if isinstance(manifest, dict) and qualified is not None and qualified[0] != package_name:
+            # Undeclared packages are reported as OLS_DEPENDENCY_UNDECLARED below.
+            if is_declared_dependency(qualified[0]):
+                diagnostics.append(
+                    Diagnostic(
+                        layer="references",
+                        source=reference["source"],
+                        jsonPointer=reference["pointer"] + "/$ref",
+                        code="OLS_REF_EXTERNAL",
+                        message=f"Reference {target} targets dependency {qualified[0]} and was not resolved locally.",
+                        severity="info",
+                    )
                 )
+            continue
+        diagnostics.append(
+            Diagnostic(
+                layer="references",
+                source=reference["source"],
+                jsonPointer=reference["pointer"] + "/$ref",
+                code="OLS_REF_PATH_ESCAPE" if ".." in target else "OLS_REF_UNRESOLVED",
+                message=f"Reference {target} could not be resolved.",
+                severity="error",
             )
+        )
     ordos = {item["value"]["id"]: item["value"] for item in entities if item["value"].get("type") == "ordo"}
     for proper in (item for item in entities if item["value"].get("type") == "proper"):
         for ordo_id in proper["value"].get("ordos", []):
@@ -331,17 +356,13 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                 severity="error",
             )
         )
-    manifest = next(
-        (doc.raw for doc in documents if isinstance(doc.raw, dict) and doc.raw.get("type") == "manifest"), None
-    )
     if isinstance(manifest, dict):
-        package_name = manifest.get("package", "")
-        dependencies = manifest.get("dependencies", [])
         for reference in refs:
             target = reference["value"]["$ref"]
-            if not target.startswith("urn:") and ":" in target:
-                dependency = target.split(":", 1)[0]
-                if dependency != package_name and not any(item.split("@", 1)[0] == dependency for item in dependencies):
+            qualified = package_qualifier(target)
+            if qualified is not None and target not in index:
+                dependency = qualified[0]
+                if dependency != package_name and not is_declared_dependency(dependency):
                     diagnostics.append(
                         Diagnostic(
                             layer="references",
@@ -440,7 +461,12 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                 )
     graph = {
         item["value"]["id"]: [
-            ref["value"]["$ref"] for ref in _walk(item["value"], item["source"])[1] if ref["value"]["$ref"] in index
+            resolved["id"]
+            for resolved in (
+                resolve_reference(ref["value"]["$ref"], index, directory, ref["source"], package_name)
+                for ref in _walk(item["value"], item["source"])[1]
+            )
+            if resolved is not None
         ]
         for item in entities
     }

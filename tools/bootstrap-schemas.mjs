@@ -36,7 +36,7 @@ for (const file of files) {
   schema['x-ols-specification'] = `https://ols.otyg.org/schema/v1.0/${file}`;
   schema['x-ols-revision'] = '1.0.0';
   if (schema.$defs?.LocalizedText?.$ref === '#/$defs/LocalizedText') {
-    schema.$defs.LocalizedText = { type: 'object', minProperties: 1, patternProperties: { '^[a-z]{2,3}(?:-[A-Z][a-z]{3})?$': { type: 'string' } }, additionalProperties: false };
+    schema.$defs.LocalizedText = { type: 'object', minProperties: 1, patternProperties: { '^(?:[a-z]{2,3}(?:-[a-z]{3}){0,3}|[a-z]{4,8})(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?(?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*(?:-x(?:-[a-z0-9]{1,8})+)?$': { type: 'string' } }, additionalProperties: false };
   }
   for (const [definitionName, entityType] of Object.entries(definitionKinds)) {
     normalizeEmbeddedDefinition(schema.$defs?.[definitionName], entityType);
@@ -46,7 +46,7 @@ for (const file of files) {
     schema.type = 'object';
     schema.properties = {
       $schema: { const: schema.$id },
-      ols_version: { type: 'string', pattern: '^1\\.0\\.[0-9]+$' },
+      ols_version: { type: 'string', pattern: '^1\\.[01]\\.[0-9]+$' },
       type: { const: 'corpus' },
       id: { $ref: '#/$defs/Id' },
       metadata: { type: 'object' }, authority: { $ref: '#/$defs/Authority' },
@@ -72,7 +72,7 @@ for (const file of files) {
     }
     schema.properties = {
       $schema: { const: schema.$id },
-      ols_version: { type: 'string', pattern: '^1\\.0\\.[0-9]+$' },
+      ols_version: { type: 'string', pattern: '^1\\.[01]\\.[0-9]+$' },
       type: { const: name },
       ...properties,
     };

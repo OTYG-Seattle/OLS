@@ -11,7 +11,8 @@ A `Block` is a reusable unit. It can contain utterances, readings, rubrics, line
 ```json
 {
   "id": "block-kyrie",
-  "type": "response",
+  "type": "block",
+  "kind": "response",
   "label": { "en": "Kyrie Eleison" },
   "elements": [
     {
@@ -31,7 +32,8 @@ Inline an element when it is private to one block. Reference it when it is reuse
 ```json
 {
   "id": "block-liturgy-of-word-opening",
-  "type": "sequence",
+  "type": "block",
+  "kind": "sequence",
   "label": { "en": "Opening of the Liturgy of the Word" },
   "elements": [
     { "$ref": "rb-gospel-procession" },

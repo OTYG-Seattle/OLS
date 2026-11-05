@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
+from openliturgy.references import resolve_reference
 from openliturgy.validation import validate_document, validate_package, validate_translation_variants
+
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
 
 def _codes(value: dict) -> list[str]:
@@ -103,3 +106,35 @@ def test_warning_for_uppercase_entity_ids(tmp_path: Path) -> None:
 
     result = validate_package(tmp_path)
     assert any(d.code == "OLS_ID_UPPERCASE" and d.severity == "warning" for d in result.diagnostics)
+
+
+def test_package_with_doc_style_mutations_is_structurally_valid() -> None:
+    result = validate_package(FIXTURES / "cross-package")
+    assert not any(d.layer == "structural" for d in result.diagnostics)
+
+
+def test_package_qualified_references_are_scoped_to_their_package() -> None:
+    result = validate_package(FIXTURES / "cross-package")
+
+    def at(slot: str) -> list[str]:
+        return [d.code for d in result.diagnostics if d.jsonPointer == f"/propers/0/fills/{slot}/$ref"]
+
+    assert at("own-qualified") == []
+    assert at("own-urn") == []
+    assert at("dependency") == ["OLS_REF_EXTERNAL"]
+    assert at("undeclared") == ["OLS_DEPENDENCY_UNDECLARED"]
+    assert at("missing") == ["OLS_REF_UNRESOLVED"]
+
+
+def test_resolve_reference_does_not_shadow_other_packages() -> None:
+    entity = {"id": "block-kyrie"}
+    index = {"block-kyrie": entity, "eotc.kidase.block.kyrie": entity}
+    assert resolve_reference("org.other:block-kyrie", index, package_name="org.local") is None
+    assert resolve_reference("org.local:block-kyrie", index, package_name="org.local") is entity
+    assert resolve_reference("urn:ols:org.local:block-kyrie", index, package_name="org.local") is entity
+    assert resolve_reference("urn:ols:eotc:kidase:block:kyrie", index) is entity
+
+
+def test_bcp47_region_and_private_use_tags_under_ols_1_1() -> None:
+    result = validate_document(FIXTURES / "complete-minimal/tests/valid/utterance-bcp47-region.ols.json")
+    assert result.valid

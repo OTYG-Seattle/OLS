@@ -141,15 +141,41 @@ function walk(value: unknown, source: string, pointer = '', entities: EntityLoca
   return { entities, refs };
 }
 
-export function resolveReference(reference: string, index: Map<string, EntityLocation>, packageRoot?: string, source?: string): EntityLocation | undefined {
-  const local = reference.startsWith('urn:ols:') ? reference.slice(8).replaceAll(':', '.') : reference.includes(':') && !reference.includes('/') ? reference.split(':').at(-1)! : reference;
+/**
+ * Splits a package-qualified reference (`<package>:<id>`) into its parts.
+ * Returns undefined for local IDs, URNs, and file references.
+ */
+export function packageQualifier(reference: string): { package: string; local: string } | undefined {
+  if (reference.startsWith('urn:') || reference.includes('/')) return undefined;
+  const separator = reference.indexOf(':');
+  if (separator <= 0 || separator === reference.length - 1) return undefined;
+  return { package: reference.slice(0, separator), local: reference.slice(separator + 1) };
+}
+
+/**
+ * Resolves a reference against the package index.
+ *
+ * - An exact ID match always wins.
+ * - `<package>:<id>` resolves locally only when `<package>` is this package (`packageName`);
+ *   references into other packages are never satisfied by a same-named local entity.
+ * - `urn:ols:<ref>` resolves `<ref>` with the same rules, falling back to the legacy
+ *   mapping that replaces `:` with `.` (`urn:ols:a:b:c` -> `a.b.c`).
+ * - Paths (`blocks/kyrie.ols.json`) resolve to a document inside the package root.
+ */
+export function resolveReference(reference: string, index: Map<string, EntityLocation>, packageRoot?: string, source?: string, packageName?: string): EntityLocation | undefined {
   if (index.has(reference)) return index.get(reference);
-  if (index.has(local)) return index.get(local);
+  if (reference.startsWith('urn:ols:')) {
+    const rest = reference.slice(8);
+    return resolveReference(rest, index, packageRoot, source, packageName) ?? index.get(rest.replaceAll(':', '.'));
+  }
   if ((reference.includes('/') || reference.endsWith('.json')) && packageRoot && source) {
     const candidate = resolve(dirname(source), reference);
     const rel = relative(packageRoot, candidate);
     if (!rel.startsWith('..') && !isAbsolute(rel)) return [...index.values()].find((item) => resolve(item.source) === candidate);
+    return undefined;
   }
+  const qualified = packageQualifier(reference);
+  if (qualified && packageName && qualified.package === packageName) return index.get(qualified.local);
   return undefined;
 }
 
@@ -244,9 +270,20 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
     }
   }
   const absoluteRoot = resolve(root);
+  const manifest = documents.find((d) => d.data?.type === 'manifest')?.data;
+  const packageName = manifest ? String(manifest.package ?? '') : undefined;
+  const dependencies = manifest?.dependencies as string[] ?? [];
+  const isDeclaredDependency = (name: string) => dependencies.some((item) => item.split('@', 1)[0] === name);
   for (const ref of refs) {
     const value = String(ref.value.$ref);
-    if (!resolveReference(value, index, absoluteRoot, ref.source)) diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: value.includes('..') ? 'OLS_REF_PATH_ESCAPE' : 'OLS_REF_UNRESOLVED', message: `Reference ${value} could not be resolved.`, severity: 'error' });
+    if (resolveReference(value, index, absoluteRoot, ref.source, packageName)) continue;
+    const qualified = packageQualifier(value);
+    if (manifest && qualified && qualified.package !== packageName) {
+      // Undeclared packages are reported as OLS_DEPENDENCY_UNDECLARED below.
+      if (isDeclaredDependency(qualified.package)) diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: 'OLS_REF_EXTERNAL', message: `Reference ${value} targets dependency ${qualified.package} and was not resolved locally.`, severity: 'info' });
+      continue;
+    }
+    diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: value.includes('..') ? 'OLS_REF_PATH_ESCAPE' : 'OLS_REF_UNRESOLVED', message: `Reference ${value} could not be resolved.`, severity: 'error' });
   }
   const ordos = new Map(entities.filter((e) => e.value.type === 'ordo').map((e) => [String(e.value.id), e.value]));
   for (const proper of entities.filter((e) => e.value.type === 'proper')) {
@@ -256,16 +293,14 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
       for (const slot of Object.keys(proper.value.fills as Record<string, unknown> ?? {})) if (!slots.has(slot)) diagnostics.push({ layer: 'semantic', source: proper.source, entityId: String(proper.value.id), jsonPointer: `${proper.pointer}/fills/${slot}`, code: 'OLS_PROPER_SLOT_UNKNOWN', message: `Ordo ${ordoId} does not declare slot ${slot}.`, severity: 'error' });
     }
   }
-  const manifest = documents.find((d) => d.data?.type === 'manifest')?.data;
   if (!manifest) diagnostics.push({ layer: 'consistency', source: normalizePath(resolve(root, 'manifest.ols.json')), jsonPointer: '', code: 'OLS_MANIFEST_MISSING', message: 'Package is missing manifest.ols.json.', severity: 'error' });
   else {
-    const packageName = String(manifest.package ?? '');
-    const dependencies = manifest.dependencies as string[] ?? [];
     for (const ref of refs) {
       const value = String(ref.value.$ref);
-      if (!value.startsWith('urn:') && value.includes(':')) {
-        const dependency = value.split(':', 1)[0]!;
-        if (dependency !== packageName && !dependencies.some((item) => item.split('@', 1)[0] === dependency)) diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: 'OLS_DEPENDENCY_UNDECLARED', message: `Reference uses undeclared dependency ${dependency}.`, severity: 'error' });
+      const qualified = packageQualifier(value);
+      if (qualified && !index.has(value)) {
+        const dependency = qualified.package;
+        if (dependency !== packageName && !isDeclaredDependency(dependency)) diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: 'OLS_DEPENDENCY_UNDECLARED', message: `Reference uses undeclared dependency ${dependency}.`, severity: 'error' });
       }
     }
     const packageAuthority = manifest.authority as Record<string, unknown> | undefined;
@@ -317,7 +352,7 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
   }
   const graph = new Map<string, string[]>();
   for (const entity of entities) {
-    const nested = walk(entity.value, entity.source).refs.map((item) => String(item.value.$ref)).filter((item) => index.has(item));
+    const nested = walk(entity.value, entity.source).refs.map((item) => resolveReference(String(item.value.$ref), index, absoluteRoot, item.source, packageName)).filter((item): item is EntityLocation => item !== undefined).map((item) => String(item.value.id));
     graph.set(String(entity.value.id), nested);
   }
   const visiting = new Set<string>(); const visited = new Set<string>();

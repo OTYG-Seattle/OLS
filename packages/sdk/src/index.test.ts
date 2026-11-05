@@ -1,8 +1,11 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { validateDocument, validatePackage, validateTranslationVariants } from './index.js';
+import { resolveReference, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
+
+const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), '../../../fixtures');
 
 describe('validateDocument', () => {
   it('reports malformed JSON at layer one', async () => {
@@ -110,5 +113,55 @@ describe('validatePackage', () => {
 
     const result = await validatePackage(directory);
     expect(result.diagnostics.some(d => d.code === 'OLS_ID_UPPERCASE' && d.severity === 'warning')).toBe(true);
+  });
+
+  it('validates a corpus package whose propers carry doc-style mutations', async () => {
+    const result = await validatePackage(join(fixtures, 'cross-package'));
+    expect(result.diagnostics.some((d) => d.layer === 'structural')).toBe(false);
+  });
+
+  it('scopes package-qualified references to their package', async () => {
+    const result = await validatePackage(join(fixtures, 'cross-package'));
+    const at = (slot: string) => result.diagnostics.filter((d) => d.jsonPointer === `/propers/0/fills/${slot}/$ref`).map((d) => d.code);
+    expect(at('own-qualified')).toEqual([]);
+    expect(at('own-urn')).toEqual([]);
+    expect(at('dependency')).toEqual(['OLS_REF_EXTERNAL']);
+    expect(at('undeclared')).toEqual(['OLS_DEPENDENCY_UNDECLARED']);
+    expect(at('missing')).toEqual(['OLS_REF_UNRESOLVED']);
+  });
+});
+
+describe('resolveReference', () => {
+  const entity = { value: { id: 'block-kyrie' }, source: 'a.json', pointer: '' };
+  const index = new Map([['block-kyrie', entity], ['eotc.kidase.block.kyrie', entity]]);
+
+  it('does not let a local entity shadow another package', () => {
+    expect(resolveReference('org.other:block-kyrie', index, undefined, undefined, 'org.local')).toBeUndefined();
+    expect(resolveReference('org.local:block-kyrie', index, undefined, undefined, 'org.local')).toBe(entity);
+  });
+
+  it('resolves URNs verbatim and via the legacy colon mapping', () => {
+    expect(resolveReference('urn:ols:org.local:block-kyrie', index, undefined, undefined, 'org.local')).toBe(entity);
+    expect(resolveReference('urn:ols:eotc:kidase:block:kyrie', index)).toBe(entity);
+  });
+});
+
+describe('language tags and versions', () => {
+  it('accepts BCP 47 region and private-use subtags under OLS 1.1', async () => {
+    const result = await validateDocument(join(fixtures, 'complete-minimal/tests/valid/utterance-bcp47-region.ols.json'));
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe('documentation examples', () => {
+  it('keeps the complete corpus example in the spec schema-valid', async () => {
+    const article = await readFile(resolve(fixtures, '../src/content/docs/profiles-examples/example/example.mdx'), 'utf8');
+    const json = /```json\n([\s\S]*?)```/.exec(article)?.[1];
+    expect(json).toBeDefined();
+    const directory = await mkdtemp(join(tmpdir(), 'ols-doc-'));
+    const source = join(directory, 'example.ols.json');
+    await writeFile(source, json!);
+    const result = await validateDocument(source);
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   });
 });

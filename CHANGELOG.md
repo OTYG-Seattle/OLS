@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cross-package references no longer resolve to same-named local entities.** In both SDKs, `<package>:<id>` now resolves locally only when `<package>` is the manifest's own `package`. A reference into a declared dependency reports `OLS_REF_EXTERNAL` (info), and a reference into an undeclared package reports only `OLS_DEPENDENCY_UNDECLARED`, no longer alongside a duplicate `OLS_REF_UNRESOLVED`. `resolveReference` / `resolve_reference` take an optional package name, and a new `packageQualifier` / `package_qualifier` helper splits qualified references.
+- `urn:ols:<ref>` resolves `<ref>` with the normal rules and falls back to the legacy `:` to `.` mapping. Reference-cycle detection now follows package-qualified, URN, and path references, not only exact IDs.
+- All 35 schemas accept `ols_version` `1.1.x`, matching the SDKs and the 1.1 documentation. Previously every 1.1 document failed schema validation.
+- `LocalizedText` keys accept the full BCP 47 grammar in canonical case (`en-US`, `pt-BR`, `es-419`, `de-CH-1996`, `gez-Latn-x-ies`). Previously only `language` or `language-Script` was accepted.
+- The `corpus` schema referenced a missing `#/$defs/Mutation` definition, which crashed TypeScript package validation of any corpus. The embedded mutation definition in `corpus` and `proper` now matches `mutation.schema.json` and the docs (`op` + `target`; `type` optional).
+- Documentation examples now use `"type": "<entity>"` plus `"kind": "<subtype>"` as the schemas require, in place of the subtype in `type`. The complete corpus example now validates, and an SDK test keeps it that way.
+
+### Changed
+
+- The parity gate now compares package-directory validation (it previously compared only document validation of the manifest) and a new `fixtures/cross-package` package.
+- The IDs article documents the reference resolution order. The LocalizedText and Schemas articles document the language-tag grammar.
+
 ## [1.1.0] - 2026-07-02
 
 ### Added

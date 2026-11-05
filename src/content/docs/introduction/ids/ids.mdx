@@ -3,7 +3,7 @@ title: 'IDs, References & Namespaces'
 description: 'Format of stable identifiers, references, namespaces, and uniqueness rules.'
 category: 'introduction'
 order: 5
-updatedAt: 2026-07-01
+updatedAt: 2026-11-05
 ---
 
 OLS v1.0 uses stable identifiers so content can be reused across apps, service books, teaching tools, and archives.
@@ -18,12 +18,12 @@ OLS v1.0 uses stable identifiers so content can be reused across apps, service b
 
 ## Reference Forms
 
-| Form           | Example                               | Use                                |
-| -------------- | ------------------------------------- | ---------------------------------- |
-| Local ID       | `block-kyrie`                         | Same file or same package context. |
-| Qualified ID   | `eotc.kidase.common.block.kyrie`      | Stable package-level reference.    |
-| URN            | `urn:ols:eotc:kidase:block:kyrie`     | Long-lived archival reference.     |
-| JSON Reference | `{ "$ref": "blocks/kyrie.ols.json" }` | File-level composition.            |
+| Form           | Example                                         | Use                                |
+| -------------- | ----------------------------------------------- | ---------------------------------- |
+| Local ID       | `block-kyrie`                                   | Same file or same package context. |
+| Qualified ID   | `org.openliturgy.eotc.core:block-kyrie`         | Stable cross-package reference.    |
+| URN            | `urn:ols:org.openliturgy.eotc.core:block-kyrie` | Long-lived archival reference.     |
+| JSON Reference | `{ "$ref": "blocks/kyrie.ols.json" }`           | File-level composition.            |
 
 ## ID Rules
 
@@ -47,9 +47,30 @@ Use the least ambiguous form that survives the expected lifetime of the content:
 ```json
 {
   "id": "sec-entrance",
-  "blocks": [{ "$ref": "block-kyrie" }, { "$ref": "org.openliturgy.eotc.core:block-trisagion" }]
+  "type": "section",
+  "label": { "en": "Entrance" },
+  "blocks": ["block-kyrie", "org.openliturgy.eotc.core:block-trisagion"]
 }
 ```
+
+## How References Resolve
+
+Validators resolve every `$ref` with the same rules, in this order:
+
+1. **Exact ID.** A reference that exactly matches an ID in the package resolves to that entity.
+2. **URN.** `urn:ols:<ref>` resolves `<ref>` using these same rules. For backward compatibility, a URN that does not resolve that way is also tried with every `:` replaced by `.` (`urn:ols:eotc:kidase:block:kyrie` → `eotc.kidase.block.kyrie`).
+3. **File path.** A reference containing `/` or ending in `.json` resolves to a document inside the package root. Paths that escape the root report `OLS_REF_PATH_ESCAPE`.
+4. **Package-qualified ID.** `<package>:<id>` splits at the first `:`.
+   - If `<package>` is this package's manifest `package`, `<id>` is looked up locally.
+   - If `<package>` is a declared dependency, the reference is **never** satisfied by a local entity with the same `<id>`. Validators report `OLS_REF_EXTERNAL` (info) until dependency resolution is available.
+   - Otherwise the validator reports `OLS_DEPENDENCY_UNDECLARED` (error).
+
+Anything else reports `OLS_REF_UNRESOLVED`. The fourth rule matters most when packages are shared: a local `block-kyrie` must not silently stand in for `org.openliturgy.eotc.core:block-kyrie`, because the two may hold different text under different authority.
+
+<Callout tone="info" title="Changed in 1.1">
+  Before 1.1, the SDK validators discarded the package prefix and accepted any local entity with the same ID. Packages
+  that relied on that behavior should declare the dependency or reference their own package explicitly.
+</Callout>
 
 ## Renames and Versions
 
