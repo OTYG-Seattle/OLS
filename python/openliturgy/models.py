@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,20 +13,20 @@ class OlsDocument(BaseModel):
     schema_uri: str = Field(alias="$schema")
     ols_version: str
     type: str
-    kind: Optional[str] = None
-    id: Optional[str] = None
-    status: Optional[str] = None
+    kind: str | None = None
+    id: str | None = None
+    status: str | None = None
 
 
 class Diagnostic(BaseModel):
     layer: Layer
     source: str
-    entityId: Optional[str] = None
+    entityId: str | None = None
     jsonPointer: str = ""
     code: str
     message: str
     severity: Severity
-    details: Optional[dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 
 class ValidationReport(BaseModel):

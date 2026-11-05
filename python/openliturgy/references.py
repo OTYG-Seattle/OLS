@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 
 def package_qualifier(reference: str) -> Optional[tuple[str, str]]:
