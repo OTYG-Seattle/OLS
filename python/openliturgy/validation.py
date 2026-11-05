@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, Optional, Union
+from typing import Any
 from urllib.parse import unquote
 
-from .loading import LoadedDocument, load_document, load_package
-from .models import Diagnostic, Layer, ValidationReport
 from .integrity import (
     bytes_digest,
     canonical_digest,
@@ -15,6 +14,8 @@ from .integrity import (
     manifest_file_entries,
     package_digest,
 )
+from .loading import LoadedDocument, load_document, load_package
+from .models import Diagnostic, Layer, ValidationReport
 from .references import package_qualifier, resolve_reference
 from .schemas import SchemaRegistry
 
@@ -762,7 +763,7 @@ def _integrity_diagnostics(
     return diagnostics
 
 
-def verify_package(root: Union[str, Path]) -> ValidationReport:
+def verify_package(root: str | Path) -> ValidationReport:
     """Integrity-only verification: every document, package-local asset, and the package itself must be pinned."""
     directory = Path(root).resolve()
     documents = load_package(directory)
@@ -784,7 +785,7 @@ def verify_package(root: Union[str, Path]) -> ValidationReport:
     return _report(diagnostics, [doc.source for doc in documents], [])
 
 
-def pack_package(root: Union[str, Path], write: bool = True) -> dict[str, Any]:
+def pack_package(root: str | Path, write: bool = True) -> dict[str, Any]:
     """Pin every package document in the manifest and recompute the package digest. Mirrors ``packPackage``."""
     directory = Path(root).resolve()
     manifest_path = directory / "manifest.ols.json"
