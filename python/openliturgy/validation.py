@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional, Union
+from typing import Any
 from urllib.parse import unquote
 
 from .integrity import (
@@ -300,11 +300,11 @@ def _reference_sites(entities: list[dict[str, Any]], refs: list[dict[str, Any]])
 
 
 LOCKFILE_NAME = "ols.lock.json"
-DependencyResolver = Callable[[str, dict[str, Any], Path], Optional[Path]]
+DependencyResolver = Callable[[str, dict[str, Any], Path], Path | None]
 """Returns the directory of a locked dependency, or ``None`` when it cannot be found."""
 
 
-def filesystem_resolver(name: str, entry: dict[str, Any], root: Path) -> Optional[Path]:
+def filesystem_resolver(name: str, entry: dict[str, Any], root: Path) -> Path | None:
     """Resolve ``lock.packages[name].resolved`` as a directory relative to the package root."""
     resolved = entry.get("resolved")
     if not isinstance(resolved, str) or not is_package_relative_uri(resolved):
@@ -313,13 +313,13 @@ def filesystem_resolver(name: str, entry: dict[str, Any], root: Path) -> Optiona
     return directory if (directory / "manifest.ols.json").is_file() else None
 
 
-def parse_dependency(spec: str) -> tuple[str, Optional[str]]:
+def parse_dependency(spec: str) -> tuple[str, str | None]:
     """Split a manifest dependency (``name`` or ``name@range``)."""
     name, at, version_range = spec.partition("@")
     return name, (version_range if at else None)
 
 
-def version_satisfies(version: str, version_range: Optional[str]) -> bool:
+def version_satisfies(version: str, version_range: str | None) -> bool:
     """A range is a version prefix: ``1`` matches 1.x.y, ``1.2`` matches 1.2.y, ``1.2.3`` matches exactly."""
     if not version_range:
         return True
@@ -443,9 +443,9 @@ def _load_dependencies(
 
 
 def validate_package(
-    root: Union[str, Path],
-    registry: Optional[SchemaRegistry] = None,
-    resolver: Optional[DependencyResolver] = None,
+    root: str | Path,
+    registry: SchemaRegistry | None = None,
+    resolver: DependencyResolver | None = None,
 ) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
@@ -1030,7 +1030,7 @@ def pack_package(root: str | Path, write: bool = True) -> dict[str, Any]:
 
 
 def lock_package(
-    root: Union[str, Path], packages_directory: str = DEFAULT_PACKAGES_DIRECTORY, write: bool = True
+    root: str | Path, packages_directory: str = DEFAULT_PACKAGES_DIRECTORY, write: bool = True
 ) -> tuple[dict[str, Any], bool]:
     """Write ``ols.lock.json`` for every declared dependency under ``packages_directory``. Mirrors ``lockPackage``."""
     directory = Path(root).resolve()
