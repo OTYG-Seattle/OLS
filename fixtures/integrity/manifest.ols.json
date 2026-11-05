@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.integrity-demo",
+  "version": "1.0.0",
+  "title": {
+    "en": "Integrity demo package"
+  },
+  "license": "Apache-2.0",
+  "allowedLicenseOverrides": [
+    "CC0-1.0"
+  ],
+  "files": [
+    {
+      "path": "corpus.ols.json",
+      "digest": "sha256:1fd1bb54a985d04b33ec2e4e99475d1f6eed013b495a966284c696dfbd0ccde7"
+    }
+  ],
+  "digest": "sha256:0981af841724d4fa0bd3618bd7d24b14aeb73ad70c38093ea8e09cba5d817cc9"
+}

@@ -1,9 +1,17 @@
 import json
+import shutil
 from pathlib import Path
 
+from openliturgy.integrity import canonical_digest, canonicalize
 from openliturgy.models import ValidationReport
 from openliturgy.references import resolve_reference
-from openliturgy.validation import validate_document, validate_package, validate_translation_variants
+from openliturgy.validation import (
+    pack_package,
+    validate_document,
+    validate_package,
+    validate_translation_variants,
+    verify_package,
+)
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
@@ -170,3 +178,30 @@ def test_role_inheritance_cycle(tmp_path: Path) -> None:
         {"type": "role", "id": "role-b", "kind": "deacon", "inherits": ["role-a"]},
     ]})
     assert any(d.code == "OLS_REF_CYCLE" for d in result.diagnostics)
+
+
+def test_canonicalization_vectors() -> None:
+    for vector in json.loads((FIXTURES / "canonical/vectors.json").read_text(encoding="utf-8")):
+        assert canonicalize(json.loads(vector["input"])) == vector["canonical"], vector["name"]
+
+
+def test_digest_ignores_formatting_order_and_normalization() -> None:
+    composed = {"text": {"en": "\u00e9glise"}, "id": "x"}
+    decomposed = json.loads('{ "id" : "x", "text": { "en": "e\\u0301glise" } }')
+    assert canonical_digest(decomposed) == canonical_digest(composed)
+
+
+def test_verify_pinned_and_tampered_fixtures() -> None:
+    assert verify_package(FIXTURES / "integrity").valid
+    codes = sorted(d.code for d in verify_package(FIXTURES / "integrity-tampered").diagnostics)
+    assert codes == ["OLS_ASSET_DIGEST_MISMATCH", "OLS_ASSET_SIZE_MISMATCH", "OLS_FILE_DIGEST_MISMATCH"]
+
+
+def test_pack_makes_package_verifiable(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "complete-minimal", package)
+    assert not verify_package(package).valid
+    manifest = pack_package(package)
+    assert manifest["digest"].startswith("sha256:")
+    assert verify_package(package).valid
+    assert validate_package(package).valid

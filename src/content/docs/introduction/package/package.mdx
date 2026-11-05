@@ -57,6 +57,10 @@ openliturgy-package/
 }
 ```
 
+## Pinning Files
+
+`files` entries may be bare paths or `{ "path", "digest" }` objects. Running `ols pack` pins every document and writes a package-level `digest`; `ols verify` checks them. See [Integrity & Canonical Form](/advanced-profiles/distribution/integrity).
+
 ## Package Rules
 
 | Rule            | Requirement                                                         |

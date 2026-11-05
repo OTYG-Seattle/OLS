@@ -24,6 +24,8 @@ An asset record is metadata and linkage, not the binary file itself. Keep large 
 
 For portable packages, processors should resolve relative URIs from the package root. They should report a missing file without discarding the liturgical entity linked by `linkedTo`.
 
+Pin package-local files with `digest` (a `sha256:` digest of the raw bytes), `byteSize`, and `mediaType` so consumers can detect a corrupted or substituted file. See [Integrity & Canonical Form](/advanced-profiles/distribution/integrity).
+
 Record enough metadata to distinguish a demonstration from an authoritative source. At minimum, document the media type, rights or license, provenance, and the entity being illustrated. For audio and video, timeline bindings can connect service entities to exact segments without splitting the media into many files.
 
 <Callout tone="warning" title="Media can identify people">

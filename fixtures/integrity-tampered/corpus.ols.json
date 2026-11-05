@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
+  "ols_version": "1.1.0",
+  "type": "corpus",
+  "id": "integrity-demo",
+  "roles": [{ "type": "role", "id": "role-cantor", "kind": "cantor" }],
+  "blocks": [
+    {
+      "type": "block", "kind": "response", "id": "block-kyrie",
+      "elements": [{ "utterance": { "id": "ut-kyrie", "roles": ["role-cantor"], "mode": "chanted", "text": { "gez-Latn": "Kyrie eleison", "en": "Lord, have mercy!" } } }]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset", "id": "asset-kyrie-demo", "kind": "audio", "uri": "assets/kyrie-demo.txt", "linkedTo": "block-kyrie",
+      "mediaType": "text/plain", "byteSize": 51, "digest": "sha256:da69d95530d3193ccaa13bd7f8fe36a03fb9ea150d71f711af9dcecfaecbf056", "license": "CC0-1.0"
+    }
+  ]
+}

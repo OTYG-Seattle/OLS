@@ -74,6 +74,13 @@ export const docsCategories = [
     icon: 'grid',
   },
   {
+    name: 'Sharing & Distribution',
+    slug: 'distribution',
+    parent: 'advanced-profiles',
+    description: 'Canonical form, digests, and tooling for publishing packages other parties can rely on.',
+    icon: 'inbox',
+  },
+  {
     name: 'Profiles & Examples',
     slug: 'profiles-examples',
     parent: 'advanced-profiles',

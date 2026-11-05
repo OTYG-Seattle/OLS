@@ -1,0 +1,109 @@
+---
+title: 'Integrity & Canonical Form'
+description: 'Canonical JSON, content digests for documents, assets, and packages, and the ols pack / ols verify workflow.'
+category: 'distribution'
+order: 41
+updatedAt: 2026-11-05
+---
+
+A package that other parishes, apps, and archives depend on must be checkable: a consumer needs to know that the files it received are the files the publisher reviewed. OLS 1.2 defines a canonical form for OLS documents and records `sha256` digests for every document, every package-local asset, and the package as a whole.
+
+## Canonical Form
+
+The canonical form of an OLS document is [RFC 8785 JSON Canonicalization (JCS)](https://www.rfc-editor.org/rfc/rfc8785) applied after Unicode [NFC normalization](https://unicode.org/reports/tr15/) of every string and member name:
+
+| Step            | Rule                                                                                |
+| --------------- | ----------------------------------------------------------------------------------- |
+| Normalization   | Every string value and member name is converted to Unicode NFC.                     |
+| Member order    | Object members are sorted by UTF-16 code unit of their (normalized) names.          |
+| Whitespace      | No insignificant whitespace.                                                        |
+| Strings         | Only `"`, `\`, and control characters are escaped; Ethiopic, Arabic, etc. are not.  |
+| Numbers         | ECMAScript number formatting: `1.0` becomes `1`, `1e21` becomes `1e+21`.            |
+| Duplicate names | Two member names that become equal after NFC make the document non-canonicalizable. |
+
+NFC matters for liturgical text. The same Ge'ez or Latin word can be stored as precomposed or decomposed code points depending on the keyboard or editor; without normalization, two byte-different files that render identically would produce different digests.
+
+```text
+{ "id" : "x", "text": { "en": "église" } }   ┐
+{"id":"x","text":{"en":"église"}}                    ┘ → {"id":"x","text":{"en":"église"}}
+```
+
+Shared test vectors live in `fixtures/canonical/vectors.json`; both SDKs must reproduce them exactly.
+
+## Digests
+
+Digests are written as `sha256:` followed by 64 lowercase hexadecimal characters.
+
+| What                | Digest input                                                      | Where it is recorded             |
+| ------------------- | ----------------------------------------------------------------- | -------------------------------- |
+| OLS document        | UTF-8 bytes of the document's canonical form.                     | `manifest.files[].digest`        |
+| Package-local asset | Raw bytes of the file.                                            | `asset.digest`, `asset.byteSize` |
+| Package             | Canonical form of the manifest without `digest` and `signatures`. | `manifest.digest`                |
+
+Because the manifest lists every document digest, the package digest commits to the whole package: changing any pinned document changes its file digest, and therefore the manifest, and therefore the package digest.
+
+```json
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.integrity-demo",
+  "version": "1.0.0",
+  "title": { "en": "Integrity demo package" },
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "corpus.ols.json",
+      "digest": "sha256:1fd1bb54a985d04b33ec2e4e99475d1f6eed013b495a966284c696dfbd0ccde7"
+    }
+  ],
+  "digest": "sha256:0981af841724d4fa0bd3618bd7d24b14aeb73ad70c38093ea8e09cba5d817cc9"
+}
+```
+
+`files` entries may still be bare paths. Packages that never pin anything keep validating exactly as before.
+
+## Assets
+
+Binary media stays outside JSON. An asset record pins its file with `digest` (over the raw bytes), `byteSize`, and `mediaType`:
+
+```json
+{
+  "type": "asset",
+  "id": "asset-kyrie-demo",
+  "kind": "audio",
+  "uri": "assets/kyrie-demo.mp3",
+  "linkedTo": "block-kyrie",
+  "mediaType": "audio/mpeg",
+  "byteSize": 482113,
+  "digest": "sha256:5f0c0e8b8c4a1f6f3e7a2d9b1c6e4f8a0b3d5c7e9f1a2b4c6d8e0f1a3b5c7d9e"
+}
+```
+
+Relative `uri` values resolve from the package root. Assets with an absolute URI (`https:`, `iiif:` …) are not fetched by validators, but recording their digest still lets consumers check a download.
+
+## Workflow
+
+```bash
+ols pack ./my-package      # pin every document and write manifest.digest
+ols verify ./my-package    # check every pin; fails on anything unpinned or changed
+ols validate ./my-package  # full validation, including any digests that are declared
+```
+
+`ols pack` lists every JSON document in the package (except `tests/`) in `manifest.files`, sorted by path, with its digest. It keeps any `mediaType` already declared and recomputes `manifest.digest` last. Running it twice produces the same manifest.
+
+| Code                          | Severity | Raised by            | Meaning                                                    |
+| ----------------------------- | -------- | -------------------- | ---------------------------------------------------------- |
+| `OLS_FILE_DIGEST_MISMATCH`    | error    | `validate`, `verify` | A document changed after it was pinned.                    |
+| `OLS_PACKAGE_DIGEST_MISMATCH` | error    | `validate`, `verify` | The manifest changed after `manifest.digest` was computed. |
+| `OLS_ASSET_DIGEST_MISMATCH`   | error    | `validate`, `verify` | An asset file's bytes differ from `asset.digest`.          |
+| `OLS_ASSET_SIZE_MISMATCH`     | error    | `validate`, `verify` | An asset file's size differs from `asset.byteSize`.        |
+| `OLS_ASSET_NOT_FOUND`         | warning  | `validate`, `verify` | A package-relative asset URI points to a missing file.     |
+| `OLS_FILE_UNPINNED`           | error    | `verify`             | A package document has no digest in the manifest.          |
+| `OLS_ASSET_UNPINNED`          | error    | `verify`             | A package-local asset has no `digest`.                     |
+| `OLS_PACKAGE_DIGEST_MISSING`  | error    | `verify`             | The manifest has no `digest`.                              |
+
+<Callout tone="info" title="Integrity is not approval">
+  A matching digest proves that content is unchanged, not that anyone approved it. Ecclesial approval stays in
+  `authority`; a digest is what an approval can be bound to so that it stops applying when the text changes.
+</Callout>

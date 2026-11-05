@@ -3,7 +3,7 @@
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/asset.schema.json",
     "revision": "1.0.0",
-    "sha256": "8358f7a06e76e826802fbf9fdb3ece9ce3816ad64186d6565595887ebed3940c"
+    "sha256": "e47107cc9df836c97a2ecf91e6372c9187ebdf8164c796901ba11d77deee984a"
   },
   "authority.schema.json": {
     "source": "synthesized",
@@ -51,7 +51,7 @@
     "source": "normative",
     "specification": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
     "revision": "1.0.0",
-    "sha256": "c33f2ce7e71fd5dfba44eb9f713a8a7ff562767ec6e96f875516a63c80003470"
+    "sha256": "ffdd7fe184d57ae1377590628b0b9e74bd8d23c9975927d367adf179c87105ef"
   },
   "execution-timeline.schema.json": {
     "source": "synthesized",
@@ -81,7 +81,7 @@
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
     "revision": "1.0.0",
-    "sha256": "0ac252db833f97d0616ba1da3befa58ea25ec11b2a3c5a1884d3c6d796029931"
+    "sha256": "1b431c18af9d05de4b0b75848e30e68578cd23898fac700a240b7bd6d6b36c01"
   },
   "mutation.schema.json": {
     "source": "synthesized",

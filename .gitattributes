@@ -1,2 +1,4 @@
 * text=auto
 *.json text eol=lf
+# Asset fixtures are pinned by raw-byte digest; never convert line endings.
+fixtures/**/assets/** -text
