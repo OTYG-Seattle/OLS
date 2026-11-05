@@ -5,7 +5,7 @@ import json
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from jsonschema.validators import Draft202012Validator
 
@@ -23,7 +23,7 @@ class SchemaRegistry:
         self.schemas = schemas
 
     @classmethod
-    def bundled(cls) -> "SchemaRegistry":
+    def bundled(cls) -> SchemaRegistry:
         directory = Path(__file__).with_name("_schemas")
         schemas: dict[str, dict[str, Any]] = {}
         for path in sorted(directory.glob("*.schema.json")):
@@ -31,14 +31,14 @@ class SchemaRegistry:
             schemas[schema["$id"]] = schema
         return cls(schemas)
 
-    def get(self, schema_id: str) -> Optional[dict[str, Any]]:
+    def get(self, schema_id: str) -> dict[str, Any] | None:
         return self.schemas.get(schema_id)
 
-    def validator(self, schema_id: str) -> Optional[Draft202012Validator]:
+    def validator(self, schema_id: str) -> Draft202012Validator | None:
         schema = self.get(schema_id)
         return Draft202012Validator(schema) if schema else None
 
-    def refresh(self, cache_directory: Union[str, Path], base_url: str = "https://ols.otyg.org/schema/v1.0/") -> None:
+    def refresh(self, cache_directory: str | Path, base_url: str = "https://ols.otyg.org/schema/v1.0/") -> None:
         cache = Path(cache_directory).expanduser().resolve()
         cache.mkdir(parents=True, exist_ok=True)
         for schema in self.schemas.values():

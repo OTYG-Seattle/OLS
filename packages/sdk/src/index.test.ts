@@ -190,7 +190,7 @@ describe('language tags and versions', () => {
 
 describe('documentation examples', () => {
   it('keeps the complete corpus example in the spec schema-valid', async () => {
-    const article = await readFile(resolve(fixtures, '../src/content/docs/profiles-examples/example/example.mdx'), 'utf8');
+    const article = (await readFile(resolve(fixtures, '../src/content/docs/profiles-examples/example/example.mdx'), 'utf8')).replaceAll('\r\n', '\n');
     const json = /```json\n([\s\S]*?)```/.exec(article)?.[1];
     expect(json).toBeDefined();
     const directory = await mkdtemp(join(tmpdir(), 'ols-doc-'));
@@ -205,7 +205,7 @@ describe('documentation examples', () => {
     const registry = await SchemaRegistry.bundled();
     const problems: string[] = [];
     for await (const file of glob('src/content/docs/**/*.mdx', { cwd: resolve(fixtures, '..') })) {
-      const article = await readFile(resolve(fixtures, '..', file), 'utf8');
+      const article = (await readFile(resolve(fixtures, '..', file), 'utf8')).replaceAll('\r\n', '\n');
       for (const match of article.matchAll(/```json\n([\s\S]*?)```/g)) {
         let example: unknown;
         try { example = JSON.parse(match[1]!); } catch { continue; }
