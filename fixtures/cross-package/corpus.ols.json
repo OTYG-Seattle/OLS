@@ -3,6 +3,12 @@
   "ols_version": "1.1.0",
   "type": "corpus",
   "id": "cross-package-demo",
+  "roles": [
+    { "type": "role", "id": "role-deacon", "kind": "deacon" }
+  ],
+  "sections": [
+    { "type": "section", "id": "sec-word", "label": { "en-US": "Word" }, "blocks": ["org.openliturgy.dep:block-kyrie", "block-missing"] }
+  ],
   "readings": [
     {
       "type": "reading", "kind": "gospel", "id": "reading-john-1-1-5", "role": "role-deacon",

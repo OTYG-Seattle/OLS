@@ -15,7 +15,7 @@ A `Section` is a major division of a service. An `Ordo` is the complete template
   "kind": "eucharist",
   "tradition": "eotc",
   "label": { "en": "Divine Liturgy / Kidase" },
-  "sections": [{ "$ref": "sec-preparation" }, { "$ref": "sec-entrance-rites" }, { "$ref": "sec-liturgy-of-word" }],
+  "sections": ["sec-preparation", "sec-entrance-rites", "sec-liturgy-of-word"],
   "properSlots": ["psalm-of-the-day", "gospel-of-the-day"]
 }
 ```
@@ -29,7 +29,7 @@ An Ordo references sections; each section then orders blocks or proper slots. Th
   "id": "sec-liturgy-of-word",
   "type": "section",
   "label": { "en": "Liturgy of the Word" },
-  "blocks": [{ "$ref": "block-epistle" }, { "$ref": "block-gospel" }]
+  "blocks": ["block-epistle", "block-gospel"]
 }
 ```
 
@@ -46,7 +46,7 @@ An Ordo references sections; each section then orders blocks or proper slots. Th
   "id": "sec-liturgy-of-word",
   "type": "section",
   "label": { "en": "Liturgy of the Word" },
-  "blocks": [{ "$ref": "block-epistle" }, { "$ref": "block-gospel" }]
+  "blocks": ["block-epistle", "block-gospel"]
 }
 ```
 

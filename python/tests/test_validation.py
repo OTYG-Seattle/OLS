@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from openliturgy.models import ValidationReport
 from openliturgy.references import resolve_reference
 from openliturgy.validation import validate_document, validate_package, validate_translation_variants
 
@@ -138,3 +139,34 @@ def test_resolve_reference_does_not_shadow_other_packages() -> None:
 def test_bcp47_region_and_private_use_tags_under_ols_1_1() -> None:
     result = validate_document(FIXTURES / "complete-minimal/tests/valid/utterance-bcp47-region.ols.json")
     assert result.valid
+
+
+def _write_package(tmp_path: Path, corpus: dict) -> ValidationReport:
+    (tmp_path / "manifest.ols.json").write_text(json.dumps({
+        "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json", "ols_version": "1.1.0",
+        "type": "manifest", "package": "org.openliturgy.test", "version": "1.0.0", "title": {"en": "Test"},
+        "files": ["corpus.ols.json"],
+    }), encoding="utf-8")
+    (tmp_path / "corpus.ols.json").write_text(json.dumps({
+        "$schema": "https://ols.otyg.org/schema/v1.0/corpus.schema.json", "ols_version": "1.1.0",
+        "type": "corpus", "id": "c", **corpus,
+    }), encoding="utf-8")
+    return validate_package(tmp_path)
+
+
+def test_id_valued_fields_are_reference_checked(tmp_path: Path) -> None:
+    result = _write_package(tmp_path, {
+        "blocks": [{"type": "block", "kind": "response", "id": "block-a", "elements": [
+            {"utterance": {"id": "ut-a", "roles": ["role-ghost"], "mode": "spoken", "text": {"en": "A"}}}]}],
+        "sections": [{"type": "section", "id": "sec-a", "label": {"en": "A"}, "blocks": ["block-a", "block-ghost"]}],
+    })
+    unresolved = [d.jsonPointer for d in result.diagnostics if d.code == "OLS_REF_UNRESOLVED"]
+    assert unresolved == ["/blocks/0/elements/0/utterance/roles/0", "/sections/0/blocks/1"]
+
+
+def test_role_inheritance_cycle(tmp_path: Path) -> None:
+    result = _write_package(tmp_path, {"roles": [
+        {"type": "role", "id": "role-a", "kind": "deacon", "inherits": ["role-b"]},
+        {"type": "role", "id": "role-b", "kind": "deacon", "inherits": ["role-a"]},
+    ]})
+    assert any(d.code == "OLS_REF_CYCLE" for d in result.diagnostics)

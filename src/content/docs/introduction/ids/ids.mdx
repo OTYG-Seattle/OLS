@@ -65,7 +65,9 @@ Validators resolve every `$ref` with the same rules, in this order:
    - If `<package>` is a declared dependency, the reference is **never** satisfied by a local entity with the same `<id>`. Validators report `OLS_REF_EXTERNAL` (info) until dependency resolution is available.
    - Otherwise the validator reports `OLS_DEPENDENCY_UNDECLARED` (error).
 
-Anything else reports `OLS_REF_UNRESOLVED`. The fourth rule matters most when packages are shared: a local `block-kyrie` must not silently stand in for `org.openliturgy.eotc.core:block-kyrie`, because the two may hold different text under different authority.
+Anything else reports `OLS_REF_UNRESOLVED`.
+
+The same rules apply to fields whose value is an ID of another entity, not only to `$ref` objects. These include `section.blocks`, `ordo.sections`, `proper.ordos`, `utterance.roles`, `reading.role`, `role.inherits`, `role-group.roles`, `rubric.actors`, `asset.linkedTo`, `teaching-note.target`, `conflict-rule.winner` and `overrides`, `service-instance.ordo` and `activePropers`, `liturgical-day.readings` and `activePropers`, and `execution-timeline.target`. List IDs directly (`"blocks": ["block-kyrie"]`); use `{ "$ref": ... }` objects only where the schema accepts an object, such as proper `fills`. The fourth rule matters most when packages are shared: a local `block-kyrie` must not silently stand in for `org.openliturgy.eotc.core:block-kyrie`, because the two may hold different text under different authority.
 
 <Callout tone="info" title="Changed in 1.1">
   Before 1.1, the SDK validators discarded the package prefix and accepted any local entity with the same ID. Packages

@@ -141,6 +141,46 @@ function walk(value: unknown, source: string, pointer = '', entities: EntityLoca
   return { entities, refs };
 }
 
+/** Entity fields whose values are IDs of other entities expected to resolve like `$ref`. */
+export const idReferenceFields: Record<string, string[]> = {
+  asset: ['linkedTo'],
+  'conflict-rule': ['winner', 'overrides'],
+  'execution-timeline': ['target'],
+  'liturgical-day': ['readings', 'activePropers'],
+  ordo: ['sections'],
+  proper: ['ordos'],
+  reading: ['role'],
+  role: ['inherits'],
+  'role-group': ['roles'],
+  rubric: ['actors'],
+  section: ['blocks'],
+  'service-instance': ['ordo', 'activePropers'],
+  'teaching-note': ['target'],
+  utterance: ['roles'],
+};
+
+type ReferenceSite = { value: string; source: string; pointer: string };
+
+/** Entity type, falling back to the containing key for embedded entities such as `{ "utterance": { ... } }`. */
+function entityType(entity: EntityLocation): string {
+  if (typeof entity.value.type === 'string' && entity.value.type in idReferenceFields) return entity.value.type;
+  const key = entity.pointer.split('/').at(-1) ?? '';
+  return key in idReferenceFields ? key : String(entity.value.type ?? '');
+}
+
+/** Every place a package refers to another entity: `$ref` objects and ID-valued fields. */
+function referenceSites(entities: EntityLocation[], refs: EntityLocation[]): ReferenceSite[] {
+  const sites: ReferenceSite[] = refs.map((ref) => ({ value: String(ref.value.$ref), source: ref.source, pointer: `${ref.pointer}/$ref` }));
+  for (const entity of entities) {
+    for (const field of idReferenceFields[entityType(entity)] ?? []) {
+      const value = entity.value[field];
+      if (typeof value === 'string') sites.push({ value, source: entity.source, pointer: `${entity.pointer}/${field}` });
+      else if (Array.isArray(value)) value.forEach((item, i) => { if (typeof item === 'string') sites.push({ value: item, source: entity.source, pointer: `${entity.pointer}/${field}/${i}` }); });
+    }
+  }
+  return sites;
+}
+
 /**
  * Splits a package-qualified reference (`<package>:<id>`) into its parts.
  * Returns undefined for local IDs, URNs, and file references.
@@ -274,16 +314,17 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
   const packageName = manifest ? String(manifest.package ?? '') : undefined;
   const dependencies = manifest?.dependencies as string[] ?? [];
   const isDeclaredDependency = (name: string) => dependencies.some((item) => item.split('@', 1)[0] === name);
-  for (const ref of refs) {
-    const value = String(ref.value.$ref);
-    if (resolveReference(value, index, absoluteRoot, ref.source, packageName)) continue;
+  const sites = referenceSites(entities, refs);
+  for (const site of sites) {
+    const { value } = site;
+    if (resolveReference(value, index, absoluteRoot, site.source, packageName)) continue;
     const qualified = packageQualifier(value);
     if (manifest && qualified && qualified.package !== packageName) {
       // Undeclared packages are reported as OLS_DEPENDENCY_UNDECLARED below.
-      if (isDeclaredDependency(qualified.package)) diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: 'OLS_REF_EXTERNAL', message: `Reference ${value} targets dependency ${qualified.package} and was not resolved locally.`, severity: 'info' });
+      if (isDeclaredDependency(qualified.package)) diagnostics.push({ layer: 'references', source: site.source, jsonPointer: site.pointer, code: 'OLS_REF_EXTERNAL', message: `Reference ${value} targets dependency ${qualified.package} and was not resolved locally.`, severity: 'info' });
       continue;
     }
-    diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: value.includes('..') ? 'OLS_REF_PATH_ESCAPE' : 'OLS_REF_UNRESOLVED', message: `Reference ${value} could not be resolved.`, severity: 'error' });
+    diagnostics.push({ layer: 'references', source: site.source, jsonPointer: site.pointer, code: value.includes('..') ? 'OLS_REF_PATH_ESCAPE' : 'OLS_REF_UNRESOLVED', message: `Reference ${value} could not be resolved.`, severity: 'error' });
   }
   const ordos = new Map(entities.filter((e) => e.value.type === 'ordo').map((e) => [String(e.value.id), e.value]));
   for (const proper of entities.filter((e) => e.value.type === 'proper')) {
@@ -295,12 +336,12 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
   }
   if (!manifest) diagnostics.push({ layer: 'consistency', source: normalizePath(resolve(root, 'manifest.ols.json')), jsonPointer: '', code: 'OLS_MANIFEST_MISSING', message: 'Package is missing manifest.ols.json.', severity: 'error' });
   else {
-    for (const ref of refs) {
-      const value = String(ref.value.$ref);
+    for (const site of sites) {
+      const { value } = site;
       const qualified = packageQualifier(value);
       if (qualified && !index.has(value)) {
         const dependency = qualified.package;
-        if (dependency !== packageName && !isDeclaredDependency(dependency)) diagnostics.push({ layer: 'references', source: ref.source, jsonPointer: `${ref.pointer}/$ref`, code: 'OLS_DEPENDENCY_UNDECLARED', message: `Reference uses undeclared dependency ${dependency}.`, severity: 'error' });
+        if (dependency !== packageName && !isDeclaredDependency(dependency)) diagnostics.push({ layer: 'references', source: site.source, jsonPointer: site.pointer, code: 'OLS_DEPENDENCY_UNDECLARED', message: `Reference uses undeclared dependency ${dependency}.`, severity: 'error' });
       }
     }
     const packageAuthority = manifest.authority as Record<string, unknown> | undefined;
@@ -352,7 +393,7 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
   }
   const graph = new Map<string, string[]>();
   for (const entity of entities) {
-    const nested = walk(entity.value, entity.source).refs.map((item) => resolveReference(String(item.value.$ref), index, absoluteRoot, item.source, packageName)).filter((item): item is EntityLocation => item !== undefined).map((item) => String(item.value.id));
+    const nested = [...walk(entity.value, entity.source).refs.map((item) => String(item.value.$ref)), ...referenceSites([entity], []).map((site) => site.value)].map((value) => resolveReference(value, index, absoluteRoot, entity.source, packageName)).filter((item): item is EntityLocation => item !== undefined).map((item) => String(item.value.id));
     graph.set(String(entity.value.id), nested);
   }
   const visiting = new Set<string>(); const visited = new Set<string>();

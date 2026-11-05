@@ -31,27 +31,9 @@ Use ISO 8601 durations such as `PT52M40S`. If `start`, `end`, and `duration` are
 
 ```json
 {
+  "type": "execution-timeline",
   "target": "reading-john-1-1-17",
-  "type": "reading",
-  "start": "08:35:10",
-  "end": "08:38:42",
-  "duration": "PT3M32S",
-  "status": "completed"
-}
-```
-
-Clock times describe position within a service record; media assets may use their own offsets. Keep the two coordinate systems distinct and link them explicitly when synchronizing a recording.
-
-## Binding Rules
-
-Timeline targets are references to resolved service entities. A target should keep the same stable ID used by the source section, block, reading, rubric, or utterance.
-
-Use ISO 8601 durations such as `PT52M40S`. If `start`, `end`, and `duration` are all present, validators should verify that they agree. Record a status such as `skipped` or `interrupted` rather than inventing zero-length timestamps for content that was not completed.
-
-```json
-{
-  "target": "reading-john-1-1-17",
-  "type": "reading",
+  "kind": "reading",
   "start": "08:35:10",
   "end": "08:38:42",
   "duration": "PT3M32S",

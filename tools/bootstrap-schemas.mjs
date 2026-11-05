@@ -21,7 +21,8 @@ function normalizeEmbeddedDefinition(definition, entityType) {
     definition.required = (definition.required ?? []).map((field) => field === 'type' ? 'kind' : field);
   }
   definition.properties.type = { const: entityType };
-  definition.required = [...new Set(['type', ...(definition.required ?? [])])];
+  // Embedded mutations are written without `type` (see proper-mutations docs); every other entity requires it.
+  if (entityType !== 'mutation') definition.required = [...new Set(['type', ...(definition.required ?? [])])];
   if (entityType === 'proper') {
     definition.properties.ordos = { type: 'array', items: { $ref: '#/$defs/Id' }, minItems: 1, uniqueItems: true };
     definition.properties.fills = { type: 'object', additionalProperties: true };
@@ -31,6 +32,11 @@ function normalizeEmbeddedDefinition(definition, entityType) {
 
 for (const file of files) {
   const schema = JSON.parse(await readFile(new URL(file, source), 'utf8'));
+  // Older site builds named the embedded mutation definition "Structural Mutation" while referencing #/$defs/Mutation.
+  if (schema.$defs?.['Structural Mutation'] && !schema.$defs.Mutation) {
+    schema.$defs.Mutation = schema.$defs['Structural Mutation'];
+    delete schema.$defs['Structural Mutation'];
+  }
   const name = file.replace('.schema.json', '');
   schema['x-ols-schema-source'] = name === 'corpus' ? 'normative' : 'synthesized';
   schema['x-ols-specification'] = `https://ols.otyg.org/schema/v1.0/${file}`;

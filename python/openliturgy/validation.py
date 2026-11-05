@@ -243,6 +243,52 @@ def _validate_translation_variants(value: Any, source: str, pointer: str = "") -
     return diagnostics
 
 
+ID_REFERENCE_FIELDS: dict[str, list[str]] = {
+    "asset": ["linkedTo"],
+    "conflict-rule": ["winner", "overrides"],
+    "execution-timeline": ["target"],
+    "liturgical-day": ["readings", "activePropers"],
+    "ordo": ["sections"],
+    "proper": ["ordos"],
+    "reading": ["role"],
+    "role": ["inherits"],
+    "role-group": ["roles"],
+    "rubric": ["actors"],
+    "section": ["blocks"],
+    "service-instance": ["ordo", "activePropers"],
+    "teaching-note": ["target"],
+    "utterance": ["roles"],
+}
+"""Entity fields whose values are IDs of other entities expected to resolve like ``$ref``."""
+
+
+def _entity_type(entity: dict[str, Any]) -> str:
+    declared = entity["value"].get("type")
+    if isinstance(declared, str) and declared in ID_REFERENCE_FIELDS:
+        return declared
+    key = entity["pointer"].rsplit("/", 1)[-1]
+    return key if key in ID_REFERENCE_FIELDS else str(declared or "")
+
+
+def _reference_sites(entities: list[dict[str, Any]], refs: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Every place a package refers to another entity: ``$ref`` objects and ID-valued fields."""
+    sites = [
+        {"value": ref["value"]["$ref"], "source": ref["source"], "pointer": ref["pointer"] + "/$ref"} for ref in refs
+    ]
+    for entity in entities:
+        for field in ID_REFERENCE_FIELDS.get(_entity_type(entity), []):
+            value = entity["value"].get(field)
+            if isinstance(value, str):
+                sites.append({"value": value, "source": entity["source"], "pointer": f"{entity['pointer']}/{field}"})
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    if isinstance(item, str):
+                        sites.append(
+                            {"value": item, "source": entity["source"], "pointer": f"{entity['pointer']}/{field}/{i}"}
+                        )
+    return sites
+
+
 def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] = None) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
@@ -298,8 +344,9 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
     def is_declared_dependency(name: str) -> bool:
         return any(item.split("@", 1)[0] == name for item in dependencies)
 
-    for reference in refs:
-        target = reference["value"]["$ref"]
+    sites = _reference_sites(entities, refs)
+    for reference in sites:
+        target = reference["value"]
         if resolve_reference(target, index, directory, reference["source"], package_name) is not None:
             continue
         qualified = package_qualifier(target)
@@ -310,7 +357,7 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                     Diagnostic(
                         layer="references",
                         source=reference["source"],
-                        jsonPointer=reference["pointer"] + "/$ref",
+                        jsonPointer=reference["pointer"],
                         code="OLS_REF_EXTERNAL",
                         message=f"Reference {target} targets dependency {qualified[0]} and was not resolved locally.",
                         severity="info",
@@ -321,7 +368,7 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
             Diagnostic(
                 layer="references",
                 source=reference["source"],
-                jsonPointer=reference["pointer"] + "/$ref",
+                jsonPointer=reference["pointer"],
                 code="OLS_REF_PATH_ESCAPE" if ".." in target else "OLS_REF_UNRESOLVED",
                 message=f"Reference {target} could not be resolved.",
                 severity="error",
@@ -357,8 +404,8 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
             )
         )
     if isinstance(manifest, dict):
-        for reference in refs:
-            target = reference["value"]["$ref"]
+        for reference in sites:
+            target = reference["value"]
             qualified = package_qualifier(target)
             if qualified is not None and target not in index:
                 dependency = qualified[0]
@@ -367,7 +414,7 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                         Diagnostic(
                             layer="references",
                             source=reference["source"],
-                            jsonPointer=reference["pointer"] + "/$ref",
+                            jsonPointer=reference["pointer"],
                             code="OLS_DEPENDENCY_UNDECLARED",
                             message=f"Reference uses undeclared dependency {dependency}.",
                             severity="error",
@@ -463,8 +510,9 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
         item["value"]["id"]: [
             resolved["id"]
             for resolved in (
-                resolve_reference(ref["value"]["$ref"], index, directory, ref["source"], package_name)
-                for ref in _walk(item["value"], item["source"])[1]
+                resolve_reference(target, index, directory, item["source"], package_name)
+                for target in [ref["value"]["$ref"] for ref in _walk(item["value"], item["source"])[1]]
+                + [site["value"] for site in _reference_sites([item], [])]
             )
             if resolved is not None
         ]

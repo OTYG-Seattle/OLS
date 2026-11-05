@@ -15,7 +15,7 @@ A `Role` is a liturgical function. A `RoleGroup` is an addressable ensemble such
   "id": "role-deacon",
   "type": "role",
   "kind": "deacon",
-  "labels": {
+  "label": {
     "en": "Deacon",
     "am-Ethi": "ዲያቆን",
     "gez-Ethi": "ዲያቆን"
@@ -55,8 +55,8 @@ Use a `RoleGroup` when one instruction or utterance addresses a stable ensemble.
 {
   "id": "role-group-clergy",
   "type": "role-group",
-  "labels": { "en": "Clergy" },
-  "members": ["role-priest", "role-deacon"]
+  "label": { "en": "Clergy" },
+  "roles": ["role-priest", "role-deacon"]
 }
 ```
 

@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { glob, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { resolveReference, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
+import { resolveReference, SchemaRegistry, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), '../../../fixtures');
 
@@ -131,6 +131,39 @@ describe('validatePackage', () => {
   });
 });
 
+describe('ID-valued reference fields', () => {
+  const writePackage = async (corpus: Record<string, unknown>) => {
+    const directory = await mkdtemp(join(tmpdir(), 'ols-ids-'));
+    await writeFile(join(directory, 'manifest.ols.json'), JSON.stringify({
+      $schema: 'https://ols.otyg.org/schema/v1.0/manifest.schema.json', ols_version: '1.1.0', type: 'manifest',
+      package: 'org.openliturgy.test', version: '1.0.0', title: { en: 'Test' }, files: ['corpus.ols.json'],
+    }));
+    await writeFile(join(directory, 'corpus.ols.json'), JSON.stringify({
+      $schema: 'https://ols.otyg.org/schema/v1.0/corpus.schema.json', ols_version: '1.1.0', type: 'corpus', id: 'c', ...corpus,
+    }));
+    return validatePackage(directory);
+  };
+
+  it('reports section blocks and utterance roles that do not exist', async () => {
+    const result = await writePackage({
+      blocks: [{ type: 'block', kind: 'response', id: 'block-a', elements: [{ utterance: { id: 'ut-a', roles: ['role-ghost'], mode: 'spoken', text: { en: 'A' } } }] }],
+      sections: [{ type: 'section', id: 'sec-a', label: { en: 'A' }, blocks: ['block-a', 'block-ghost'] }],
+    });
+    const unresolved = result.diagnostics.filter((d) => d.code === 'OLS_REF_UNRESOLVED').map((d) => d.jsonPointer);
+    expect(unresolved).toEqual(['/blocks/0/elements/0/utterance/roles/0', '/sections/0/blocks/1']);
+  });
+
+  it('detects role inheritance cycles', async () => {
+    const result = await writePackage({
+      roles: [
+        { type: 'role', id: 'role-a', kind: 'deacon', inherits: ['role-b'] },
+        { type: 'role', id: 'role-b', kind: 'deacon', inherits: ['role-a'] },
+      ],
+    });
+    expect(result.diagnostics.some((d) => d.code === 'OLS_REF_CYCLE')).toBe(true);
+  });
+});
+
 describe('resolveReference', () => {
   const entity = { value: { id: 'block-kyrie' }, source: 'a.json', pointer: '' };
   const index = new Map([['block-kyrie', entity], ['eotc.kidase.block.kyrie', entity]]);
@@ -163,5 +196,25 @@ describe('documentation examples', () => {
     await writeFile(source, json!);
     const result = await validateDocument(source);
     expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  });
+
+  it('keeps every typed example in the spec consistent with its schema', async () => {
+    // Examples may be partial (missing required fields), but the fields they show must be valid.
+    const registry = await SchemaRegistry.bundled();
+    const problems: string[] = [];
+    for await (const file of glob('src/content/docs/**/*.mdx', { cwd: resolve(fixtures, '..') })) {
+      const article = await readFile(resolve(fixtures, '..', file), 'utf8');
+      for (const match of article.matchAll(/```json\n([\s\S]*?)```/g)) {
+        let example: unknown;
+        try { example = JSON.parse(match[1]!); } catch { continue; }
+        if (!example || typeof example !== 'object' || Array.isArray(example)) continue;
+        const type = (example as Record<string, unknown>).type;
+        const id = `https://ols.otyg.org/schema/v1.0/${String(type)}.schema.json`;
+        if (typeof type !== 'string' || !registry.get(id)) continue;
+        const validator = registry.validate(id, { $schema: id, ols_version: '1.1.0', ...example });
+        for (const error of validator?.errors ?? []) if (error.keyword !== 'required') problems.push(`${file}: ${error.instancePath || '/'} ${error.message}`);
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });
