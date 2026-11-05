@@ -4,13 +4,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from .schemas import SchemaRegistry
 from .validation import LAYERS, pack_package, run_self_tests, validate_document, validate_package, verify_package
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ols", description="OpenLiturgy Standard SDK")
     commands = parser.add_subparsers(dest="command", required=True)
     validate = commands.add_parser("validate")
@@ -57,7 +56,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"{item.severity.upper()} {item.code} {item.source}{item.jsonPointer}: {item.message}")
             print("OLS validation passed." if result.valid else "OLS validation failed.")
         return 0 if result.valid else 1
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - any failure is reported as exit code 2, like the TypeScript CLI
         print(str(error), file=sys.stderr)
         return 2
 

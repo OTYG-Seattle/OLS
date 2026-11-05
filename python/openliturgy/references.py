@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 
-def package_qualifier(reference: str) -> Optional[tuple[str, str]]:
+def package_qualifier(reference: str) -> tuple[str, str] | None:
     """Split a package-qualified reference (``<package>:<id>``) into ``(package, id)``.
 
     Returns ``None`` for local IDs, URNs, and file references.
@@ -20,10 +20,10 @@ def package_qualifier(reference: str) -> Optional[tuple[str, str]]:
 def resolve_reference(
     reference: str,
     index: dict[str, dict[str, Any]],
-    package_root: Optional[Union[str, Path]] = None,
-    source: Optional[Union[str, Path]] = None,
-    package_name: Optional[str] = None,
-) -> Optional[dict[str, Any]]:
+    package_root: str | Path | None = None,
+    source: str | Path | None = None,
+    package_name: str | None = None,
+) -> dict[str, Any] | None:
     """Resolve a reference against the package index.
 
     Mirrors ``resolveReference`` in ``@openliturgy/sdk``:

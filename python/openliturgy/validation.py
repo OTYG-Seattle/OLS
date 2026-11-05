@@ -22,7 +22,7 @@ LAYERS: list[Layer] = ["parse", "schema-selection", "structural", "consistency",
 
 
 def _report(
-    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: Optional[list[Layer]] = None
+    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: list[Layer] | None = None
 ) -> ValidationReport:
     diagnostics.sort(key=lambda item: (LAYERS.index(item.layer), item.source, item.jsonPointer, item.code))
     return ValidationReport(
@@ -35,7 +35,7 @@ def _report(
 
 
 def validate_document(
-    value: Union[str, Path, LoadedDocument], registry: Optional[SchemaRegistry] = None
+    value: str | Path | LoadedDocument, registry: SchemaRegistry | None = None
 ) -> ValidationReport:
     loaded = load_document(value) if isinstance(value, (str, Path)) else value
     diagnostics: list[Diagnostic] = []
@@ -298,7 +298,7 @@ def _reference_sites(entities: list[dict[str, Any]], refs: list[dict[str, Any]])
     return sites
 
 
-def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] = None) -> ValidationReport:
+def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
     documents = load_package(directory)
@@ -820,7 +820,7 @@ def validate_translation_variants(data: dict[str, Any], source: str = "<inline>"
     return _validate_translation_variants(data, source)
 
 
-def run_self_tests(root: Union[str, Path]) -> ValidationReport:
+def run_self_tests(root: str | Path) -> ValidationReport:
     diagnostics: list[Diagnostic] = []
     directory = Path(root).resolve()
     for expected_valid, name in ((True, "valid"), (False, "invalid")):
