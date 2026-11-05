@@ -17,6 +17,14 @@ from .loading import DEFAULT_PACKAGES_DIRECTORY, LoadedDocument, load_document, 
 from .models import Diagnostic, Layer, Severity, ValidationReport
 from .references import package_qualifier, resolve_reference
 from .schemas import SchemaRegistry
+from .trust import (
+    ATTESTED_STATUSES,
+    approval_signature_message,
+    package_signature_message,
+    sign_message,
+    trusted_key,
+    verify_signature,
+)
 
 LAYERS: list[Layer] = ["parse", "schema-selection", "structural", "consistency", "references", "semantic"]
 
@@ -445,6 +453,7 @@ def validate_package(
     root: Union[str, Path],
     registry: Optional[SchemaRegistry] = None,
     resolver: Optional[DependencyResolver] = None,
+    keyring: Optional[dict[str, Any]] = None,
 ) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
@@ -727,6 +736,7 @@ def validate_package(
                     )
                 )
     diagnostics.extend(_integrity_diagnostics(directory, documents, entities, strict=False))
+    diagnostics.extend(_trust_diagnostics(directory, documents, keyring, strict=False))
     graph = {
         item["value"]["id"]: [
             resolved["id"]
@@ -975,7 +985,219 @@ def _integrity_diagnostics(
     return diagnostics
 
 
-def verify_package(root: Union[str, Path]) -> ValidationReport:
+def _signatures(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _trust_diagnostics(
+    directory: Path, documents: list[LoadedDocument], keyring: Optional[dict[str, Any]], strict: bool
+) -> list[Diagnostic]:
+    """Signature and approval checks shared by ``validate_package`` and ``verify_package``. Mirrors ``trustDiagnostics``."""
+    diagnostics: list[Diagnostic] = []
+    manifest_source = (directory / "manifest.ols.json").as_posix()
+    manifest_document = next((doc for doc in documents if doc.source == manifest_source), None)
+    if manifest_document is not None and isinstance(manifest_document.raw, dict):
+        manifest = _parsed(manifest_document)
+        message = package_signature_message(package_digest(manifest))
+        trusted = False
+        for i, entry in enumerate(_signatures(manifest.get("signatures"))):
+            if not verify_signature(message, entry):
+                diagnostics.append(
+                    Diagnostic(
+                        layer="semantic",
+                        source=manifest_source,
+                        jsonPointer=f"/signatures/{i}",
+                        code="OLS_SIGNATURE_INVALID",
+                        message="Package signature does not match the package content or key.",
+                        severity="error",
+                    )
+                )
+            elif keyring is not None and trusted_key(keyring, entry["key"]) is None:
+                diagnostics.append(
+                    Diagnostic(
+                        layer="semantic",
+                        source=manifest_source,
+                        jsonPointer=f"/signatures/{i}",
+                        code="OLS_SIGNATURE_UNTRUSTED",
+                        message=f"Package is signed by {entry['key']}, which is not in the keyring.",
+                        severity="info",
+                    )
+                )
+            elif keyring is not None:
+                trusted = True
+        if strict and keyring is not None and not trusted:
+            diagnostics.append(
+                Diagnostic(
+                    layer="semantic",
+                    source=manifest_source,
+                    jsonPointer="",
+                    code="OLS_PACKAGE_UNSIGNED",
+                    message="The package has no valid signature from a trusted key.",
+                    severity="error",
+                )
+            )
+    entities: list[dict[str, Any]] = []
+    for document in documents:
+        if isinstance(document.raw, dict):
+            entities.extend(_walk(_parsed(document), document.source)[0])
+    index: dict[str, dict[str, Any]] = {}
+    for entity in entities:
+        index.setdefault(str(entity["value"]["id"]), entity)
+    covered: list[tuple[str, dict[str, Any]]] = []
+    for document in documents:
+        if not isinstance(document.raw, dict) or document.raw.get("type") != "approval" or document.data is None:
+            continue
+        approval = _parsed(document)
+        status = str(approval.get("status"))
+        approval_id = str(approval.get("id"))
+        attested = keyring is None
+        message = approval_signature_message(approval)
+        for i, entry in enumerate(_signatures(approval.get("signatures"))):
+            if not verify_signature(message, entry):
+                diagnostics.append(
+                    Diagnostic(
+                        layer="semantic",
+                        source=document.source,
+                        entityId=approval_id,
+                        jsonPointer=f"/signatures/{i}",
+                        code="OLS_SIGNATURE_INVALID",
+                        message="Approval signature does not match the approval or key.",
+                        severity="error",
+                    )
+                )
+                continue
+            if keyring is None:
+                continue
+            key = trusted_key(keyring, entry["key"])
+            approves = key.get("approves") if key is not None else None
+            if key is not None and (approves is None or status in approves):
+                attested = True
+            else:
+                diagnostics.append(
+                    Diagnostic(
+                        layer="semantic",
+                        source=document.source,
+                        entityId=approval_id,
+                        jsonPointer=f"/signatures/{i}",
+                        code="OLS_SIGNATURE_UNTRUSTED",
+                        message=(
+                            f"Key {entry['key']} is trusted, but not to attest {status}."
+                            if key is not None
+                            else f"Approval is signed by {entry['key']}, which is not in the keyring."
+                        ),
+                        severity="info",
+                    )
+                )
+        if not attested:
+            diagnostics.append(
+                Diagnostic(
+                    layer="semantic",
+                    source=document.source,
+                    entityId=approval_id,
+                    jsonPointer="",
+                    code="OLS_APPROVAL_UNTRUSTED",
+                    message=f"Approval {approval_id} has no valid signature from a key trusted to attest {status}.",
+                    severity="error" if strict else "warning",
+                )
+            )
+        subjects = approval.get("subjects") if isinstance(approval.get("subjects"), list) else []
+        for i, subject in enumerate(subjects):
+            subject_entity = index.get(str(subject.get("entity"))) if isinstance(subject, dict) else None
+            if subject_entity is None:
+                diagnostics.append(
+                    Diagnostic(
+                        layer="semantic",
+                        source=document.source,
+                        entityId=approval_id,
+                        jsonPointer=f"/subjects/{i}/entity",
+                        code="OLS_APPROVAL_SUBJECT_UNRESOLVED",
+                        message=f"Approved entity {subject.get('entity') if isinstance(subject, dict) else subject} is not in the package.",
+                        severity="error",
+                    )
+                )
+                continue
+            actual = canonical_digest(subject_entity["value"])
+            if actual != subject.get("digest"):
+                diagnostics.append(
+                    Diagnostic(
+                        layer="semantic",
+                        source=document.source,
+                        entityId=approval_id,
+                        jsonPointer=f"/subjects/{i}/digest",
+                        code="OLS_APPROVAL_STALE",
+                        message=(
+                            f"{subject.get('entity')} changed after it was approved (now {actual}); "
+                            "the approval no longer applies to it."
+                        ),
+                        severity="error",
+                    )
+                )
+                continue
+            if attested:
+                covered.append((status, subject_entity))
+    for entity in entities:
+        authority = entity["value"].get("authority")
+        claimed = authority.get("status") if isinstance(authority, dict) else None
+        if not isinstance(claimed, str) or claimed not in ATTESTED_STATUSES:
+            continue
+        is_covered = any(
+            item_status == claimed
+            and item["source"] == entity["source"]
+            and (entity["pointer"] == item["pointer"] or entity["pointer"].startswith(item["pointer"] + "/"))
+            for item_status, item in covered
+        )
+        if not is_covered:
+            entity_id = str(entity["value"].get("id"))
+            diagnostics.append(
+                Diagnostic(
+                    layer="semantic",
+                    source=entity["source"],
+                    entityId=entity_id,
+                    jsonPointer=entity["pointer"] + "/authority/status",
+                    code="OLS_AUTHORITY_UNATTESTED",
+                    message=f"{entity_id} claims {claimed}, but no approval in effect covers its current content.",
+                    severity="warning",
+                )
+            )
+    return diagnostics
+
+
+def sign_package(root: Union[str, Path], private_key_pem: str, signer: Optional[str] = None) -> dict[str, str]:
+    """Sign a packed package: add (or replace) this key's signature over the package digest. Mirrors ``signPackage``."""
+    directory = Path(root).resolve()
+    manifest_path = directory / "manifest.ols.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    verification = verify_package(directory)
+    if not isinstance(manifest.get("digest"), str) or not verification.valid:
+        codes = ", ".join(dict.fromkeys(item.code for item in verification.diagnostics))
+        raise ValueError(f"Run `ols pack` before signing; the package does not verify ({codes}).")
+    entry = sign_message(package_signature_message(manifest["digest"]), private_key_pem)
+    if signer:
+        entry["signer"] = signer
+    manifest["signatures"] = [
+        item for item in _signatures(manifest.get("signatures")) if not (isinstance(item, dict) and item.get("key") == entry["key"])
+    ] + [entry]
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return entry
+
+
+def sign_approval(path: Union[str, Path], private_key_pem: str, signer: Optional[str] = None) -> dict[str, str]:
+    """Sign an approval document in place. Mirrors ``signApproval``; re-run ``ols pack`` afterwards."""
+    file = Path(path)
+    approval = json.loads(file.read_text(encoding="utf-8"))
+    if approval.get("type") != "approval":
+        raise ValueError(f"{path} is not an approval document.")
+    entry = sign_message(approval_signature_message(approval), private_key_pem)
+    if signer:
+        entry["signer"] = signer
+    approval["signatures"] = [
+        item for item in _signatures(approval.get("signatures")) if not (isinstance(item, dict) and item.get("key") == entry["key"])
+    ] + [entry]
+    file.write_text(json.dumps(approval, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return entry
+
+
+def verify_package(root: Union[str, Path], keyring: Optional[dict[str, Any]] = None) -> ValidationReport:
     """Integrity-only verification: every document, package-local asset, and the package itself must be pinned."""
     directory = Path(root).resolve()
     documents = load_package(directory)
@@ -984,6 +1206,7 @@ def verify_package(root: Union[str, Path]) -> ValidationReport:
         if isinstance(document.raw, dict):
             entities.extend(_walk(_parsed(document), document.source)[0])
     diagnostics = _integrity_diagnostics(directory, documents, entities, strict=True)
+    diagnostics.extend(_trust_diagnostics(directory, documents, keyring, strict=True))
     if not any(isinstance(doc.raw, dict) and doc.raw.get("type") == "manifest" for doc in documents):
         diagnostics.append(
             Diagnostic(
@@ -1021,8 +1244,11 @@ def pack_package(root: Union[str, Path], write: bool = True) -> dict[str, Any]:
         files.append(entry)
     files.sort(key=lambda entry: entry["path"].encode("utf-16-be"))
     manifest["files"] = files
-    manifest.pop("digest", None)
+    previous_digest = manifest.pop("digest", None)
     manifest["digest"] = package_digest(manifest)
+    # Signatures cover the previous digest; once the content changes they can only be invalid.
+    if previous_digest != manifest["digest"]:
+        manifest.pop("signatures", None)
     if write:
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return manifest

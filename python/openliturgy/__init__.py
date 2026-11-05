@@ -3,6 +3,7 @@ from .loading import LoadedDocument, load_document, load_package
 from .models import Diagnostic, ValidationReport
 from .references import resolve_reference
 from .schemas import SchemaRegistry
+from .trust import generate_signing_key, public_key_for, verify_signature
 from .validation import (
     LOCKFILE_NAME,
     filesystem_resolver,
@@ -10,6 +11,8 @@ from .validation import (
     pack_package,
     parse_dependency,
     run_self_tests,
+    sign_approval,
+    sign_package,
     validate_document,
     validate_package,
     validate_translation_variants,
@@ -26,17 +29,22 @@ __all__ = [
     "canonical_digest",
     "canonicalize",
     "filesystem_resolver",
+    "generate_signing_key",
     "load_document",
     "load_package",
     "lock_package",
     "pack_package",
     "package_digest",
     "parse_dependency",
+    "public_key_for",
     "resolve_reference",
     "run_self_tests",
+    "sign_approval",
+    "sign_package",
     "validate_document",
     "validate_package",
     "validate_translation_variants",
     "verify_package",
+    "verify_signature",
     "version_satisfies",
 ]

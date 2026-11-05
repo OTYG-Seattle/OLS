@@ -1,0 +1,29 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.signed-demo",
+  "version": "1.0.0",
+  "title": {
+    "en": "Signed and approved demo package"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "approvals/diocesan-review.ols.json",
+      "digest": "sha256:28de9cb713a3eb7c93eaf233aab4f7034ab960ae2e3dd732db01ecea313d9f1e"
+    },
+    {
+      "path": "corpus.ols.json",
+      "digest": "sha256:827a1bcfcc9ada87c1d9b16182fe7af245a5b9db9a14cf7361ffc6bf6bb02fa7"
+    }
+  ],
+  "digest": "sha256:ea6596ad7803a4f1cd42a4d5931d3366b437dacf72dcc6f5de34b4b4b533784c",
+  "signatures": [
+    {
+      "key": "ed25519:JJ_a3SxMi_btlclVusnTQj_FUo7WKXcIPPC8LCB3mO0",
+      "signature": "hBOk41AHG19BNaZMBnIsE1zakKnSfAmjkKBvcyAO45f6mWDiZ_5RvxZy4hIpUHjH7mDsnBTUbCGQU7dDrCBPCA",
+      "signer": "org-demo-diocese"
+    }
+  ]
+}

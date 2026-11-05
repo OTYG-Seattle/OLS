@@ -1,0 +1,6 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/keyring.schema.json",
+  "ols_version": "1.1.0",
+  "type": "keyring",
+  "keys": [{ "key": "ed25519:JJ_a3SxMi_btlclVusnTQj_FUo7WKXcIPPC8LCB3mO0", "name": "Demo diocese (test fixture only)", "approves": ["diocesan-approved"] }]
+}

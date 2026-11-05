@@ -53,6 +53,13 @@ await compare('verify pinned package', ['verify', resolve('fixtures/integrity'),
 await compare('verify tampered package', ['verify', resolve('fixtures/integrity-tampered'), '--format', 'json']);
 await compare('verify unpinned package', ['verify', resolve('fixtures/complete-minimal'), '--format', 'json']);
 
+// Trust: signatures and digest-bound approvals, with and without a keyring.
+const keyring = resolve('fixtures/keys/demo-keyring.json');
+await compare('verify signed package with keyring', ['verify', resolve('fixtures/signed'), '--keyring', keyring, '--format', 'json']);
+await compare('verify signed package without keyring', ['verify', resolve('fixtures/signed'), '--format', 'json']);
+await compare('verify re-packed tampered signed package', ['verify', resolve('fixtures/signed-tampered'), '--keyring', keyring, '--format', 'json']);
+await compare('validate signed package with keyring', ['validate', resolve('fixtures/signed'), '--keyring', keyring, '--format', 'json']);
+
 // Integrity: `ols pack --stdout` must produce byte-identical manifests.
 for (const fixture of ['fixtures/complete-minimal', 'fixtures/integrity', 'fixtures/cross-package']) {
   const args = ['pack', resolve(fixture), '--stdout'];

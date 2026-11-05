@@ -11,7 +11,7 @@ The site is built as a highly performant static documentation portal using **Ast
 
 ## Architecture & Section Hierarchy
 
-The specification is modularly divided into 44 documentation files (`.mdx`) and organized across 3 parent categories and 10 sub-categories:
+The specification is modularly divided into 45 documentation files (`.mdx`) and organized across 3 parent categories and 10 sub-categories:
 
 1. **Specification**
    - **Introduction**: Release overview, document status, scope rules, package layout, and referencing.
@@ -24,7 +24,7 @@ The specification is modularly divided into 44 documentation files (`.mdx`) and 
 3. **Advanced & Profiles**
    - **Scholarly & Media**: Variants, apparatus, teaching annotations, commentary, and assets references.
    - **Schemas & Governance**: JSON schema verification, conformance levels (L0 to L7), test fixtures, and technical governance.
-   - **Sharing & Distribution**: Canonical JSON, content digests, the `ols pack` / `ols verify` integrity workflow, dependency locking with `ols lock`, the JSON-LD context, PROV-O mapping, and publisher catalogs.
+   - **Sharing & Distribution**: Canonical JSON, content digests, the `ols pack` / `ols verify` integrity workflow, dependency locking with `ols lock`, the JSON-LD context, PROV-O mapping, publisher catalogs, and Ed25519 signatures with digest-bound approvals.
    - **Profiles & Examples**: EOTC Profile v1, Oriental Orthodox layers, bibliography references, and a complete corpus JSON example.
 
 ---
@@ -80,7 +80,7 @@ python -m pip install -e "python[dev]"
 python -m pytest python/tests
 ```
 
-Both distributions expose `ols validate PATH`, `ols validate PATH --self-test`, `ols pack PATH`, `ols verify PATH`, `ols lock PATH`, and `ols schemas refresh`. `ols pack` pins every package document by digest in `manifest.ols.json`; `ols verify` fails if anything is unpinned or changed. `ols lock` pins declared dependencies (found under `ols_packages/`) in `ols.lock.json`, and validation then resolves `dependency:id` references against them. Validation is offline by default. Node.js 20+ and Python 3.10+ are supported.
+Both distributions expose `ols validate PATH`, `ols validate PATH --self-test`, `ols pack PATH`, `ols verify PATH`, `ols lock PATH`, `ols keygen`, `ols sign PATH`, and `ols schemas refresh`. `ols pack` pins every package document by digest in `manifest.ols.json`; `ols verify` fails if anything is unpinned or changed. `ols lock` pins declared dependencies (found under `ols_packages/`) in `ols.lock.json`, and validation then resolves `dependency:id` references against them. `ols sign` adds Ed25519 signatures to packages and approval documents, and `--keyring` on `verify`/`validate` decides which keys are trusted. Validation is offline by default. Node.js 20+ and Python 3.10+ are supported.
 
 ### Structured Data
 

@@ -1,4 +1,10 @@
 {
+  "approval.schema.json": {
+    "source": "normative",
+    "specification": "https://ols.otyg.org/schema/v1.0/approval.schema.json",
+    "revision": "1.2.0",
+    "sha256": "e88dcddc2026c63247260880e525e0038b891dbff9f7456eee75909b8c539de7"
+  },
   "asset.schema.json": {
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/asset.schema.json",
@@ -71,6 +77,12 @@
     "revision": "1.0.0",
     "sha256": "bee2ec80b428df302fef8643f6cd0cdb239dfca2e9a783bc4a4346d3dad8399d"
   },
+  "keyring.schema.json": {
+    "source": "normative",
+    "specification": "https://ols.otyg.org/schema/v1.0/keyring.schema.json",
+    "revision": "1.2.0",
+    "sha256": "c403bcefad6265fc7b5d6f6154e8ecfad3167d8f580395072ec43075e0201824"
+  },
   "liturgical-day.schema.json": {
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/liturgical-day.schema.json",
@@ -93,7 +105,7 @@
     "source": "synthesized",
     "specification": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
     "revision": "1.0.0",
-    "sha256": "c1fbcb49b3f1f1a863bb3ffbde088f5a61bc3c55abdb52a7a6ba84030cedf5fd"
+    "sha256": "16067662b1099736c2b94d66ed8242eeadba4fec70016f3d834995c7341dc620"
   },
   "mutation.schema.json": {
     "source": "synthesized",
