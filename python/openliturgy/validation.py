@@ -451,10 +451,10 @@ def _load_dependencies(
 
 
 def validate_package(
-    root: Union[str, Path],
-    registry: Optional[SchemaRegistry] = None,
-    resolver: Optional[DependencyResolver] = None,
-    keyring: Optional[dict[str, Any]] = None,
+    root: str | Path,
+    registry: SchemaRegistry | None = None,
+    resolver: DependencyResolver | None = None,
+    keyring: dict[str, Any] | None = None,
 ) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
@@ -991,7 +991,7 @@ def _signatures(value: Any) -> list[Any]:
 
 
 def _trust_diagnostics(
-    directory: Path, documents: list[LoadedDocument], keyring: Optional[dict[str, Any]], strict: bool
+    directory: Path, documents: list[LoadedDocument], keyring: dict[str, Any] | None, strict: bool
 ) -> list[Diagnostic]:
     """Signature and approval checks shared by ``validate_package`` and ``verify_package``. Mirrors ``trustDiagnostics``."""
     diagnostics: list[Diagnostic] = []
@@ -1163,7 +1163,7 @@ def _trust_diagnostics(
     return diagnostics
 
 
-def sign_package(root: Union[str, Path], private_key_pem: str, signer: Optional[str] = None) -> dict[str, str]:
+def sign_package(root: str | Path, private_key_pem: str, signer: str | None = None) -> dict[str, str]:
     """Sign a packed package: add (or replace) this key's signature over the package digest. Mirrors ``signPackage``."""
     directory = Path(root).resolve()
     manifest_path = directory / "manifest.ols.json"
@@ -1182,7 +1182,7 @@ def sign_package(root: Union[str, Path], private_key_pem: str, signer: Optional[
     return entry
 
 
-def sign_approval(path: Union[str, Path], private_key_pem: str, signer: Optional[str] = None) -> dict[str, str]:
+def sign_approval(path: str | Path, private_key_pem: str, signer: str | None = None) -> dict[str, str]:
     """Sign an approval document in place. Mirrors ``signApproval``; re-run ``ols pack`` afterwards."""
     file = Path(path)
     approval = json.loads(file.read_text(encoding="utf-8"))
@@ -1198,7 +1198,7 @@ def sign_approval(path: Union[str, Path], private_key_pem: str, signer: Optional
     return entry
 
 
-def verify_package(root: Union[str, Path], keyring: Optional[dict[str, Any]] = None) -> ValidationReport:
+def verify_package(root: str | Path, keyring: dict[str, Any] | None = None) -> ValidationReport:
     """Integrity-only verification: every document, package-local asset, and the package itself must be pinned."""
     directory = Path(root).resolve()
     documents = load_package(directory)
