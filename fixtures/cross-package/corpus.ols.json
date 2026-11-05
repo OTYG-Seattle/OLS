@@ -1,0 +1,38 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
+  "ols_version": "1.1.0",
+  "type": "corpus",
+  "id": "cross-package-demo",
+  "roles": [
+    { "type": "role", "id": "role-deacon", "kind": "deacon" }
+  ],
+  "sections": [
+    { "type": "section", "id": "sec-word", "label": { "en-US": "Word" }, "blocks": ["org.openliturgy.dep:block-kyrie", "block-missing"] }
+  ],
+  "readings": [
+    {
+      "type": "reading", "kind": "gospel", "id": "reading-john-1-1-5", "role": "role-deacon",
+      "reference": { "system": "osis", "osisRef": "John.1.1-John.1.5" }
+    }
+  ],
+  "ordos": [
+    {
+      "type": "ordo", "kind": "eucharist", "id": "ordo-demo", "label": { "en-US": "Demo" }, "sections": ["sec-word"],
+      "properSlots": ["own-qualified", "own-urn", "dependency", "undeclared", "missing"]
+    }
+  ],
+  "propers": [
+    {
+      "type": "proper", "id": "proper-demo", "ordos": ["ordo-demo"], "priority": 100,
+      "priorityClass": "major-feast", "conditions": { "month": 5, "day": 11 },
+      "fills": {
+        "own-qualified": { "$ref": "org.openliturgy.local:reading-john-1-1-5" },
+        "own-urn": { "$ref": "urn:ols:org.openliturgy.local:reading-john-1-1-5" },
+        "dependency": { "$ref": "org.openliturgy.dep:reading-john-1-1-5" },
+        "undeclared": { "$ref": "org.example.other:reading-john-1-1-5" },
+        "missing": { "$ref": "reading-does-not-exist" }
+      },
+      "mutations": [{ "op": "omit", "target": "reading-john-1-1-5" }]
+    }
+  ]
+}

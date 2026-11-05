@@ -1,0 +1,11 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.1.0",
+  "type": "manifest",
+  "package": "org.openliturgy.local",
+  "version": "1.0.0",
+  "title": { "en-US": "Cross-package reference fixture" },
+  "license": "Apache-2.0",
+  "dependencies": ["org.openliturgy.dep@1"],
+  "files": ["corpus.ols.json"]
+}

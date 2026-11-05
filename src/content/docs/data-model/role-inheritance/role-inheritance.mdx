@@ -11,8 +11,9 @@ Liturgical roles are not flat. A bishop may serve in the place of a priest, a se
 ```json
 {
   "id": "role-bishop",
-  "type": "bishop",
-  "labels": { "en": "Bishop" },
+  "type": "role",
+  "kind": "bishop",
+  "label": { "en": "Bishop" },
   "implements": ["role-priest", "role-celebrant"],
   "substitutesFor": [
     {

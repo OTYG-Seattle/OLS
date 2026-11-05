@@ -9,7 +9,8 @@ updatedAt: 2026-07-02
 `LocalizedText` is the basic human-readable text type. It supports multiple languages, scripts, transliteration, and text metadata.
 
 <Callout type="info">
-A single language may have more than one accepted translation. See [Translation Variants](/liturgical-elements/data-model/translation-variants) for multi-variant support within a language.
+  A single language may have more than one accepted translation. See [Translation
+  Variants](/liturgical-elements/data-model/translation-variants) for multi-variant support within a language.
 </Callout>
 
 ## Schema Pattern
@@ -49,7 +50,20 @@ A single language may have more than one accepted translation. See [Translation 
 
 ## Language Selection
 
-Language keys are BCP 47-style tags. Script subtags matter when one language appears in more than one writing system, as with `gez-Ethi` and `gez-Latn`.
+Language keys are [BCP 47](https://www.rfc-editor.org/info/bcp47) tags. Script subtags matter when one language appears in more than one writing system, as with `gez-Ethi` and `gez-Latn`.
+
+Since OLS 1.1, the schemas accept the full BCP 47 tag grammar in canonical case:
+
+| Subtag      | Case                  | Example                    |
+| ----------- | --------------------- | -------------------------- |
+| Language    | lowercase             | `en`, `gez`                |
+| Script      | Title case            | `gez-Ethi`, `zh-Hant`      |
+| Region      | UPPERCASE or 3 digits | `en-US`, `pt-BR`, `es-419` |
+| Variant     | lowercase             | `de-CH-1996`               |
+| Extension   | lowercase             | `en-u-ca-ethiopic`         |
+| Private use | lowercase             | `gez-Latn-x-ies`           |
+
+Tags in any other case (`EN`, `en-us`) or with underscores (`en_US`) are rejected. Requiring canonical case means two publishers writing the same tag produce identical keys, so merged and compared text maps line up.
 
 Consumers must not treat object order as a fallback order. A renderer should choose languages from an explicit preference list and then use a documented application fallback, for example:
 

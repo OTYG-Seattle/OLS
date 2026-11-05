@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, Optional, Union
+from typing import Any
 
 from .loading import LoadedDocument, load_document, load_package
 from .models import Diagnostic, Layer, ValidationReport
-from .references import resolve_reference
+from .references import package_qualifier, resolve_reference
 from .schemas import SchemaRegistry
 
 LAYERS: list[Layer] = ["parse", "schema-selection", "structural", "consistency", "references", "semantic"]
 
 
 def _report(
-    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: Optional[list[Layer]] = None
+    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: list[Layer] | None = None
 ) -> ValidationReport:
     diagnostics.sort(key=lambda item: (LAYERS.index(item.layer), item.source, item.jsonPointer, item.code))
     return ValidationReport(
@@ -26,7 +27,7 @@ def _report(
 
 
 def validate_document(
-    value: Union[str, Path, LoadedDocument], registry: Optional[SchemaRegistry] = None
+    value: str | Path | LoadedDocument, registry: SchemaRegistry | None = None
 ) -> ValidationReport:
     loaded = load_document(value) if isinstance(value, (str, Path)) else value
     diagnostics: list[Diagnostic] = []
@@ -243,7 +244,53 @@ def _validate_translation_variants(value: Any, source: str, pointer: str = "") -
     return diagnostics
 
 
-def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] = None) -> ValidationReport:
+ID_REFERENCE_FIELDS: dict[str, list[str]] = {
+    "asset": ["linkedTo"],
+    "conflict-rule": ["winner", "overrides"],
+    "execution-timeline": ["target"],
+    "liturgical-day": ["readings", "activePropers"],
+    "ordo": ["sections"],
+    "proper": ["ordos"],
+    "reading": ["role"],
+    "role": ["inherits"],
+    "role-group": ["roles"],
+    "rubric": ["actors"],
+    "section": ["blocks"],
+    "service-instance": ["ordo", "activePropers"],
+    "teaching-note": ["target"],
+    "utterance": ["roles"],
+}
+"""Entity fields whose values are IDs of other entities expected to resolve like ``$ref``."""
+
+
+def _entity_type(entity: dict[str, Any]) -> str:
+    declared = entity["value"].get("type")
+    if isinstance(declared, str) and declared in ID_REFERENCE_FIELDS:
+        return declared
+    key = entity["pointer"].rsplit("/", 1)[-1]
+    return key if key in ID_REFERENCE_FIELDS else str(declared or "")
+
+
+def _reference_sites(entities: list[dict[str, Any]], refs: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Every place a package refers to another entity: ``$ref`` objects and ID-valued fields."""
+    sites = [
+        {"value": ref["value"]["$ref"], "source": ref["source"], "pointer": ref["pointer"] + "/$ref"} for ref in refs
+    ]
+    for entity in entities:
+        for field in ID_REFERENCE_FIELDS.get(_entity_type(entity), []):
+            value = entity["value"].get(field)
+            if isinstance(value, str):
+                sites.append({"value": value, "source": entity["source"], "pointer": f"{entity['pointer']}/{field}"})
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    if isinstance(item, str):
+                        sites.append(
+                            {"value": item, "source": entity["source"], "pointer": f"{entity['pointer']}/{field}/{i}"}
+                        )
+    return sites
+
+
+def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
     documents = load_package(directory)
@@ -289,19 +336,45 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                     severity="warning",
                 )
             )
-    for reference in refs:
-        target = reference["value"]["$ref"]
-        if resolve_reference(target, index, directory, reference["source"]) is None:
-            diagnostics.append(
-                Diagnostic(
-                    layer="references",
-                    source=reference["source"],
-                    jsonPointer=reference["pointer"] + "/$ref",
-                    code="OLS_REF_PATH_ESCAPE" if ".." in target else "OLS_REF_UNRESOLVED",
-                    message=f"Reference {target} could not be resolved.",
-                    severity="error",
+    manifest = next(
+        (doc.raw for doc in documents if isinstance(doc.raw, dict) and doc.raw.get("type") == "manifest"), None
+    )
+    package_name = str(manifest.get("package", "")) if isinstance(manifest, dict) else None
+    dependencies = manifest.get("dependencies", []) if isinstance(manifest, dict) else []
+
+    def is_declared_dependency(name: str) -> bool:
+        return any(item.split("@", 1)[0] == name for item in dependencies)
+
+    sites = _reference_sites(entities, refs)
+    for reference in sites:
+        target = reference["value"]
+        if resolve_reference(target, index, directory, reference["source"], package_name) is not None:
+            continue
+        qualified = package_qualifier(target)
+        if isinstance(manifest, dict) and qualified is not None and qualified[0] != package_name:
+            # Undeclared packages are reported as OLS_DEPENDENCY_UNDECLARED below.
+            if is_declared_dependency(qualified[0]):
+                diagnostics.append(
+                    Diagnostic(
+                        layer="references",
+                        source=reference["source"],
+                        jsonPointer=reference["pointer"],
+                        code="OLS_REF_EXTERNAL",
+                        message=f"Reference {target} targets dependency {qualified[0]} and was not resolved locally.",
+                        severity="info",
+                    )
                 )
+            continue
+        diagnostics.append(
+            Diagnostic(
+                layer="references",
+                source=reference["source"],
+                jsonPointer=reference["pointer"],
+                code="OLS_REF_PATH_ESCAPE" if ".." in target else "OLS_REF_UNRESOLVED",
+                message=f"Reference {target} could not be resolved.",
+                severity="error",
             )
+        )
     ordos = {item["value"]["id"]: item["value"] for item in entities if item["value"].get("type") == "ordo"}
     for proper in (item for item in entities if item["value"].get("type") == "proper"):
         for ordo_id in proper["value"].get("ordos", []):
@@ -331,22 +404,18 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                 severity="error",
             )
         )
-    manifest = next(
-        (doc.raw for doc in documents if isinstance(doc.raw, dict) and doc.raw.get("type") == "manifest"), None
-    )
     if isinstance(manifest, dict):
-        package_name = manifest.get("package", "")
-        dependencies = manifest.get("dependencies", [])
-        for reference in refs:
-            target = reference["value"]["$ref"]
-            if not target.startswith("urn:") and ":" in target:
-                dependency = target.split(":", 1)[0]
-                if dependency != package_name and not any(item.split("@", 1)[0] == dependency for item in dependencies):
+        for reference in sites:
+            target = reference["value"]
+            qualified = package_qualifier(target)
+            if qualified is not None and target not in index:
+                dependency = qualified[0]
+                if dependency != package_name and not is_declared_dependency(dependency):
                     diagnostics.append(
                         Diagnostic(
                             layer="references",
                             source=reference["source"],
-                            jsonPointer=reference["pointer"] + "/$ref",
+                            jsonPointer=reference["pointer"],
                             code="OLS_DEPENDENCY_UNDECLARED",
                             message=f"Reference uses undeclared dependency {dependency}.",
                             severity="error",
@@ -440,7 +509,13 @@ def validate_package(root: Union[str, Path], registry: Optional[SchemaRegistry] 
                 )
     graph = {
         item["value"]["id"]: [
-            ref["value"]["$ref"] for ref in _walk(item["value"], item["source"])[1] if ref["value"]["$ref"] in index
+            resolved["id"]
+            for resolved in (
+                resolve_reference(target, index, directory, item["source"], package_name)
+                for target in [ref["value"]["$ref"] for ref in _walk(item["value"], item["source"])[1]]
+                + [site["value"] for site in _reference_sites([item], [])]
+            )
+            if resolved is not None
         ]
         for item in entities
     }
@@ -535,7 +610,7 @@ def validate_translation_variants(data: dict[str, Any], source: str = "<inline>"
     return _validate_translation_variants(data, source)
 
 
-def run_self_tests(root: Union[str, Path]) -> ValidationReport:
+def run_self_tests(root: str | Path) -> ValidationReport:
     diagnostics: list[Diagnostic] = []
     directory = Path(root).resolve()
     for expected_valid, name in ((True, "valid"), (False, "invalid")):

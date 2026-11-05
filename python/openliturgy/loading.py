@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from .models import OlsDocument
 
@@ -13,14 +13,14 @@ class LoadedDocument:
     source: str
     raw_text: str
     raw: Any
-    data: Optional[OlsDocument]
+    data: OlsDocument | None
 
 
 def _normal(path: Path) -> str:
     return path.as_posix()
 
 
-def load_document(source: Union[str, Path]) -> LoadedDocument:
+def load_document(source: str | Path) -> LoadedDocument:
     path = Path(source).resolve()
     text = path.read_text(encoding="utf-8")
     try:
@@ -36,7 +36,7 @@ def load_document(source: Union[str, Path]) -> LoadedDocument:
     return LoadedDocument(_normal(path), text, raw, data)
 
 
-def load_package(root: Union[str, Path]) -> list[LoadedDocument]:
+def load_package(root: str | Path) -> list[LoadedDocument]:
     directory = Path(root).resolve()
     files = sorted(
         path
