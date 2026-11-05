@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional, Union
+from typing import Any
 from urllib.parse import unquote
 
 from .integrity import (
@@ -30,7 +31,7 @@ LAYERS: list[Layer] = ["parse", "schema-selection", "structural", "consistency",
 
 
 def _report(
-    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: Optional[list[Layer]] = None
+    diagnostics: list[Diagnostic], files: Iterable[str], versions: Iterable[str], skipped: list[Layer] | None = None
 ) -> ValidationReport:
     diagnostics.sort(key=lambda item: (LAYERS.index(item.layer), item.source, item.jsonPointer, item.code))
     return ValidationReport(
@@ -43,7 +44,7 @@ def _report(
 
 
 def validate_document(
-    value: Union[str, Path, LoadedDocument], registry: Optional[SchemaRegistry] = None
+    value: str | Path | LoadedDocument, registry: SchemaRegistry | None = None
 ) -> ValidationReport:
     loaded = load_document(value) if isinstance(value, (str, Path)) else value
     diagnostics: list[Diagnostic] = []
@@ -307,11 +308,11 @@ def _reference_sites(entities: list[dict[str, Any]], refs: list[dict[str, Any]])
 
 
 LOCKFILE_NAME = "ols.lock.json"
-DependencyResolver = Callable[[str, dict[str, Any], Path], Optional[Path]]
+DependencyResolver = Callable[[str, dict[str, Any], Path], Path | None]
 """Returns the directory of a locked dependency, or ``None`` when it cannot be found."""
 
 
-def filesystem_resolver(name: str, entry: dict[str, Any], root: Path) -> Optional[Path]:
+def filesystem_resolver(name: str, entry: dict[str, Any], root: Path) -> Path | None:
     """Resolve ``lock.packages[name].resolved`` as a directory relative to the package root."""
     resolved = entry.get("resolved")
     if not isinstance(resolved, str) or not is_package_relative_uri(resolved):
@@ -320,13 +321,13 @@ def filesystem_resolver(name: str, entry: dict[str, Any], root: Path) -> Optiona
     return directory if (directory / "manifest.ols.json").is_file() else None
 
 
-def parse_dependency(spec: str) -> tuple[str, Optional[str]]:
+def parse_dependency(spec: str) -> tuple[str, str | None]:
     """Split a manifest dependency (``name`` or ``name@range``)."""
     name, at, version_range = spec.partition("@")
     return name, (version_range if at else None)
 
 
-def version_satisfies(version: str, version_range: Optional[str]) -> bool:
+def version_satisfies(version: str, version_range: str | None) -> bool:
     """A range is a version prefix: ``1`` matches 1.x.y, ``1.2`` matches 1.2.y, ``1.2.3`` matches exactly."""
     if not version_range:
         return True
@@ -450,10 +451,10 @@ def _load_dependencies(
 
 
 def validate_package(
-    root: Union[str, Path],
-    registry: Optional[SchemaRegistry] = None,
-    resolver: Optional[DependencyResolver] = None,
-    keyring: Optional[dict[str, Any]] = None,
+    root: str | Path,
+    registry: SchemaRegistry | None = None,
+    resolver: DependencyResolver | None = None,
+    keyring: dict[str, Any] | None = None,
 ) -> ValidationReport:
     directory = Path(root).resolve()
     schemas = registry or SchemaRegistry.bundled()
@@ -990,7 +991,7 @@ def _signatures(value: Any) -> list[Any]:
 
 
 def _trust_diagnostics(
-    directory: Path, documents: list[LoadedDocument], keyring: Optional[dict[str, Any]], strict: bool
+    directory: Path, documents: list[LoadedDocument], keyring: dict[str, Any] | None, strict: bool
 ) -> list[Diagnostic]:
     """Signature and approval checks shared by ``validate_package`` and ``verify_package``. Mirrors ``trustDiagnostics``."""
     diagnostics: list[Diagnostic] = []
@@ -1162,7 +1163,7 @@ def _trust_diagnostics(
     return diagnostics
 
 
-def sign_package(root: Union[str, Path], private_key_pem: str, signer: Optional[str] = None) -> dict[str, str]:
+def sign_package(root: str | Path, private_key_pem: str, signer: str | None = None) -> dict[str, str]:
     """Sign a packed package: add (or replace) this key's signature over the package digest. Mirrors ``signPackage``."""
     directory = Path(root).resolve()
     manifest_path = directory / "manifest.ols.json"
@@ -1181,7 +1182,7 @@ def sign_package(root: Union[str, Path], private_key_pem: str, signer: Optional[
     return entry
 
 
-def sign_approval(path: Union[str, Path], private_key_pem: str, signer: Optional[str] = None) -> dict[str, str]:
+def sign_approval(path: str | Path, private_key_pem: str, signer: str | None = None) -> dict[str, str]:
     """Sign an approval document in place. Mirrors ``signApproval``; re-run ``ols pack`` afterwards."""
     file = Path(path)
     approval = json.loads(file.read_text(encoding="utf-8"))
@@ -1197,7 +1198,7 @@ def sign_approval(path: Union[str, Path], private_key_pem: str, signer: Optional
     return entry
 
 
-def verify_package(root: Union[str, Path], keyring: Optional[dict[str, Any]] = None) -> ValidationReport:
+def verify_package(root: str | Path, keyring: dict[str, Any] | None = None) -> ValidationReport:
     """Integrity-only verification: every document, package-local asset, and the package itself must be pinned."""
     directory = Path(root).resolve()
     documents = load_package(directory)
@@ -1220,7 +1221,7 @@ def verify_package(root: Union[str, Path], keyring: Optional[dict[str, Any]] = N
     return _report(diagnostics, [doc.source for doc in documents], [])
 
 
-def pack_package(root: Union[str, Path], write: bool = True) -> dict[str, Any]:
+def pack_package(root: str | Path, write: bool = True) -> dict[str, Any]:
     """Pin every package document in the manifest and recompute the package digest. Mirrors ``packPackage``."""
     directory = Path(root).resolve()
     manifest_path = directory / "manifest.ols.json"
@@ -1255,7 +1256,7 @@ def pack_package(root: Union[str, Path], write: bool = True) -> dict[str, Any]:
 
 
 def lock_package(
-    root: Union[str, Path], packages_directory: str = DEFAULT_PACKAGES_DIRECTORY, write: bool = True
+    root: str | Path, packages_directory: str = DEFAULT_PACKAGES_DIRECTORY, write: bool = True
 ) -> tuple[dict[str, Any], bool]:
     """Write ``ols.lock.json`` for every declared dependency under ``packages_directory``. Mirrors ``lockPackage``."""
     directory = Path(root).resolve()
@@ -1304,7 +1305,7 @@ def validate_translation_variants(data: dict[str, Any], source: str = "<inline>"
     return _validate_translation_variants(data, source)
 
 
-def run_self_tests(root: Union[str, Path]) -> ValidationReport:
+def run_self_tests(root: str | Path) -> ValidationReport:
     diagnostics: list[Diagnostic] = []
     directory = Path(root).resolve()
     for expected_valid, name in ((True, "valid"), (False, "invalid")):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from typing import Any, Optional
+from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -85,7 +85,7 @@ def verify_signature(message: bytes, entry: Any) -> bool:
         return False
 
 
-def trusted_key(keyring: Optional[dict[str, Any]], key: str) -> Optional[dict[str, Any]]:
+def trusted_key(keyring: dict[str, Any] | None, key: str) -> dict[str, Any] | None:
     """The keyring entry for a key, if the consumer trusts it."""
     if not isinstance(keyring, dict):
         return None
