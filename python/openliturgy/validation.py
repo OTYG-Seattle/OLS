@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
+from .integrity import (
+    bytes_digest,
+    canonical_digest,
+    is_package_relative_uri,
+    manifest_file_entries,
+    package_digest,
+)
 from .loading import LoadedDocument, load_document, load_package
 from .models import Diagnostic, Layer, ValidationReport
 from .references import package_qualifier, resolve_reference
@@ -428,13 +437,11 @@ def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -
         allowed_licenses = set(manifest.get("allowedLicenseOverrides", []))
 
         manifest_source = (directory / "manifest.ols.json").as_posix()
-        manifest_files = manifest.get("files", [])
-        absolute_manifest_files = {
-            (directory / f).resolve().as_posix() for f in manifest_files
-        }
+        manifest_files = manifest_file_entries(manifest.get("files"))
+        absolute_manifest_files = {(directory / entry["path"]).resolve().as_posix() for entry in manifest_files}
 
-        for idx, f in enumerate(manifest_files):
-            abs_path = (directory / f).resolve().as_posix()
+        for idx, entry in enumerate(manifest_files):
+            abs_path = (directory / entry["path"]).resolve().as_posix()
             if not any(doc.source == abs_path for doc in documents):
                 diagnostics.append(
                     Diagnostic(
@@ -442,7 +449,7 @@ def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -
                         source=manifest_source,
                         jsonPointer=f"/files/{idx}",
                         code="OLS_MANIFEST_FILE_NOT_FOUND",
-                        message=f"Declared file {f} does not exist in the package.",
+                        message=f"Declared file {entry['path']} does not exist in the package.",
                         severity="error",
                     )
                 )
@@ -507,6 +514,7 @@ def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -
                         severity="error",
                     )
                 )
+    diagnostics.extend(_integrity_diagnostics(directory, documents, entities, strict=False))
     graph = {
         item["value"]["id"]: [
             resolved["id"]
@@ -603,6 +611,209 @@ def validate_package(root: str | Path, registry: SchemaRegistry | None = None) -
                     )
                 )
     return _report(diagnostics, [document.source for document in documents], versions)
+
+
+def _parsed(document: LoadedDocument) -> Any:
+    """Fresh parse of a document: validation annotates parsed entities in place, which must not affect digests."""
+    return json.loads(document.raw_text)
+
+
+def _integrity_diagnostics(
+    directory: Path, documents: list[LoadedDocument], entities: list[dict[str, Any]], strict: bool
+) -> list[Diagnostic]:
+    """Integrity checks shared by ``validate_package`` (declared digests) and ``verify_package`` (all pinned)."""
+    diagnostics: list[Diagnostic] = []
+    manifest_source = (directory / "manifest.ols.json").as_posix()
+    manifest_document = next((doc for doc in documents if doc.source == manifest_source), None)
+    if manifest_document is None or not isinstance(manifest_document.raw, dict):
+        return diagnostics
+    manifest = _parsed(manifest_document)
+    pinned: set[str] = set()
+    for idx, entry in enumerate(manifest_file_entries(manifest.get("files"))):
+        source = (directory / entry["path"]).resolve().as_posix()
+        document = next((doc for doc in documents if doc.source == source), None)
+        if not entry.get("digest") or document is None or document.raw is None:
+            continue
+        pinned.add(source)
+        actual = canonical_digest(_parsed(document))
+        if actual != entry["digest"]:
+            diagnostics.append(
+                Diagnostic(
+                    layer="consistency",
+                    source=manifest_source,
+                    jsonPointer=f"/files/{idx}/digest",
+                    code="OLS_FILE_DIGEST_MISMATCH",
+                    message=f"{entry['path']} has digest {actual}, but the manifest declares {entry['digest']}.",
+                    severity="error",
+                )
+            )
+    if isinstance(manifest.get("digest"), str):
+        actual = package_digest(manifest)
+        if actual != manifest["digest"]:
+            diagnostics.append(
+                Diagnostic(
+                    layer="consistency",
+                    source=manifest_source,
+                    jsonPointer="/digest",
+                    code="OLS_PACKAGE_DIGEST_MISMATCH",
+                    message=f"The package digest is {actual}, but the manifest declares {manifest['digest']}.",
+                    severity="error",
+                )
+            )
+    elif strict:
+        diagnostics.append(
+            Diagnostic(
+                layer="consistency",
+                source=manifest_source,
+                jsonPointer="",
+                code="OLS_PACKAGE_DIGEST_MISSING",
+                message="The manifest does not declare a package digest; run `ols pack`.",
+                severity="error",
+            )
+        )
+    if strict:
+        for document in documents:
+            if document.source == manifest_source or document.source in pinned:
+                continue
+            diagnostics.append(
+                Diagnostic(
+                    layer="consistency",
+                    source=document.source,
+                    jsonPointer="",
+                    code="OLS_FILE_UNPINNED",
+                    message="The manifest does not declare a digest for this file; run `ols pack`.",
+                    severity="error",
+                )
+            )
+    for entity in entities:
+        value = entity["value"]
+        uri = value.get("uri")
+        if value.get("type") != "asset" or not isinstance(uri, str) or not is_package_relative_uri(uri):
+            continue
+        entity_id = str(value.get("id"))
+        target = (directory / unquote(re.split(r"[?#]", uri, maxsplit=1)[0])).resolve()
+        try:
+            target.relative_to(directory)
+        except ValueError:
+            diagnostics.append(
+                Diagnostic(
+                    layer="references",
+                    source=entity["source"],
+                    entityId=entity_id,
+                    jsonPointer=entity["pointer"] + "/uri",
+                    code="OLS_REF_PATH_ESCAPE",
+                    message=f"Asset URI {uri} resolves outside the package root.",
+                    severity="error",
+                )
+            )
+            continue
+        if not target.is_file():
+            diagnostics.append(
+                Diagnostic(
+                    layer="references",
+                    source=entity["source"],
+                    entityId=entity_id,
+                    jsonPointer=entity["pointer"] + "/uri",
+                    code="OLS_ASSET_NOT_FOUND",
+                    message=f"Asset file {uri} is not in the package.",
+                    severity="warning",
+                )
+            )
+            continue
+        data = target.read_bytes()
+        byte_size = value.get("byteSize")
+        if isinstance(byte_size, int) and not isinstance(byte_size, bool) and byte_size != len(data):
+            diagnostics.append(
+                Diagnostic(
+                    layer="consistency",
+                    source=entity["source"],
+                    entityId=entity_id,
+                    jsonPointer=entity["pointer"] + "/byteSize",
+                    code="OLS_ASSET_SIZE_MISMATCH",
+                    message=f"Asset file is {len(data)} bytes, but byteSize declares {byte_size}.",
+                    severity="error",
+                )
+            )
+        if isinstance(value.get("digest"), str):
+            actual = bytes_digest(data)
+            if actual != value["digest"]:
+                diagnostics.append(
+                    Diagnostic(
+                        layer="consistency",
+                        source=entity["source"],
+                        entityId=entity_id,
+                        jsonPointer=entity["pointer"] + "/digest",
+                        code="OLS_ASSET_DIGEST_MISMATCH",
+                        message=f"Asset file has digest {actual}, but the record declares {value['digest']}.",
+                        severity="error",
+                    )
+                )
+        elif strict:
+            diagnostics.append(
+                Diagnostic(
+                    layer="consistency",
+                    source=entity["source"],
+                    entityId=entity_id,
+                    jsonPointer=entity["pointer"],
+                    code="OLS_ASSET_UNPINNED",
+                    message="Package-local asset has no digest.",
+                    severity="error",
+                )
+            )
+    return diagnostics
+
+
+def verify_package(root: str | Path) -> ValidationReport:
+    """Integrity-only verification: every document, package-local asset, and the package itself must be pinned."""
+    directory = Path(root).resolve()
+    documents = load_package(directory)
+    entities: list[dict[str, Any]] = []
+    for document in documents:
+        if isinstance(document.raw, dict):
+            entities.extend(_walk(_parsed(document), document.source)[0])
+    diagnostics = _integrity_diagnostics(directory, documents, entities, strict=True)
+    if not any(isinstance(doc.raw, dict) and doc.raw.get("type") == "manifest" for doc in documents):
+        diagnostics.append(
+            Diagnostic(
+                layer="consistency",
+                source=(directory / "manifest.ols.json").as_posix(),
+                code="OLS_MANIFEST_MISSING",
+                message="Package is missing manifest.ols.json.",
+                severity="error",
+            )
+        )
+    return _report(diagnostics, [doc.source for doc in documents], [])
+
+
+def pack_package(root: str | Path, write: bool = True) -> dict[str, Any]:
+    """Pin every package document in the manifest and recompute the package digest. Mirrors ``packPackage``."""
+    directory = Path(root).resolve()
+    manifest_path = directory / "manifest.ols.json"
+    documents = load_package(directory)
+    manifest_document = next((doc for doc in documents if doc.source == manifest_path.as_posix()), None)
+    if manifest_document is None or not isinstance(manifest_document.raw, dict):
+        raise ValueError("Package is missing a readable manifest.ols.json.")
+    manifest = dict(_parsed(manifest_document))
+    previous = {entry["path"]: entry for entry in manifest_file_entries(manifest.get("files"))}
+    files: list[dict[str, Any]] = []
+    for document in documents:
+        if document is manifest_document:
+            continue
+        if document.raw is None:
+            raise ValueError(f"{document.source} is not valid JSON.")
+        path = Path(document.source).relative_to(directory).as_posix()
+        entry: dict[str, Any] = {"path": path, "digest": canonical_digest(_parsed(document))}
+        media_type = previous.get(path, {}).get("mediaType")
+        if media_type:
+            entry["mediaType"] = media_type
+        files.append(entry)
+    files.sort(key=lambda entry: entry["path"].encode("utf-16-be"))
+    manifest["files"] = files
+    manifest.pop("digest", None)
+    manifest["digest"] = package_digest(manifest)
+    if write:
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return manifest
 
 
 def validate_translation_variants(data: dict[str, Any], source: str = "<inline>") -> list[Diagnostic]:

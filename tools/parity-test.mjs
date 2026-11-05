@@ -38,4 +38,18 @@ await compare('cross-package references', ['validate', resolve('fixtures/cross-p
 // Self-test suite covers valid/invalid document fixtures, including translation variants.
 await compare('self-test fixtures', ['validate', resolve('fixtures/complete-minimal'), '--self-test', '--format', 'json']);
 
+// Integrity: verification reports for pinned, tampered, and unpinned packages.
+await compare('verify pinned package', ['verify', resolve('fixtures/integrity'), '--format', 'json']);
+await compare('verify tampered package', ['verify', resolve('fixtures/integrity-tampered'), '--format', 'json']);
+await compare('verify unpinned package', ['verify', resolve('fixtures/complete-minimal'), '--format', 'json']);
+
+// Integrity: `ols pack --stdout` must produce byte-identical manifests.
+for (const fixture of ['fixtures/complete-minimal', 'fixtures/integrity', 'fixtures/cross-package']) {
+  const args = ['pack', resolve(fixture), '--stdout'];
+  const node = await run(process.execPath, ['packages/cli/dist/cli.js', ...args]);
+  const python = await run(pythonExecutable, ['-m', 'openliturgy.cli', ...args]);
+  if (node.stdout !== python.stdout) throw new Error(`SDK parity mismatch (pack ${fixture})\nTypeScript: ${node.stdout}\nPython: ${python.stdout}`);
+  console.log(`Parity OK: pack ${fixture}`);
+}
+
 console.log('TypeScript and Python reports are equivalent.');

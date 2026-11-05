@@ -1,0 +1,47 @@
+[
+  {
+    "name": "member order is by UTF-16 code unit",
+    "input": "{\"b\":1,\"a\":2,\"\\uff61\":3,\"\\ud83d\\ude00\":4,\"A\":5}",
+    "canonical": "{\"A\":5,\"a\":2,\"b\":1,\"😀\":4,\"｡\":3}"
+  },
+  {
+    "name": "whitespace is removed",
+    "input": "{ \"x\" : [ 1 , 2 ,\n 3 ] }",
+    "canonical": "{\"x\":[1,2,3]}"
+  },
+  {
+    "name": "strings and names are NFC-normalized",
+    "input": "{\"cafe\\u0301\":\"e\\u0301glise\"}",
+    "canonical": "{\"café\":\"église\"}"
+  },
+  {
+    "name": "Ethiopic and RTL text are not escaped",
+    "input": "{\"gez-Ethi\":\"ኪርያ ኤሌይሶን\",\"ar\":\"يا رب ارحم\"}",
+    "canonical": "{\"ar\":\"يا رب ارحم\",\"gez-Ethi\":\"ኪርያ ኤሌይሶን\"}"
+  },
+  {
+    "name": "control characters use short or lowercase escapes",
+    "input": "\"\\u0000\\b\\t\\n\\f\\r\\u001f \\\"quote\\\" back\\\\slash \\u007f \\u2028\"",
+    "canonical": "\"\\u0000\\b\\t\\n\\f\\r\\u001f \\\"quote\\\" back\\\\slash   \""
+  },
+  {
+    "name": "integral numbers drop the fraction",
+    "input": "[1.0, -0.0, 0, 100, 1e2]",
+    "canonical": "[1,0,0,100,100]"
+  },
+  {
+    "name": "ECMAScript number formatting",
+    "input": "[1e21, 1e20, 123456789012345680000, 0.000001, 1e-7, 1.5e-10, 3.14159, -2.5e+25, 9007199254740993]",
+    "canonical": "[1e+21,100000000000000000000,123456789012345680000,0.000001,1e-7,1.5e-10,3.14159,-2.5e+25,9007199254740992]"
+  },
+  {
+    "name": "literals",
+    "input": "[true,false,null]",
+    "canonical": "[true,false,null]"
+  },
+  {
+    "name": "nested objects sort independently",
+    "input": "{\"z\":{\"b\":[{\"d\":1,\"c\":2}],\"a\":null},\"m\":\"x\"}",
+    "canonical": "{\"m\":\"x\",\"z\":{\"a\":null,\"b\":[{\"c\":2,\"d\":1}]}}"
+  }
+]

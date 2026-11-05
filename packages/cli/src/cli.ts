@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { Command } from 'commander';
-import { runSelfTests, SchemaRegistry, validateDocument, validatePackage } from '@openliturgy/sdk';
+import { packPackage, runSelfTests, SchemaRegistry, validateDocument, validatePackage, verifyPackage } from '@openliturgy/sdk';
 import type { ValidationReport } from '@openliturgy/sdk';
 
 function printReport(report: ValidationReport, format: string): void {
@@ -35,6 +35,21 @@ program.command('validate').argument('<path>').option('--layer <layer>').option(
     process.exitCode = 2;
   }
 });
+program.command('verify').description('Check that every document, local asset, and the package itself are pinned by digest and unchanged')
+  .argument('<path>', 'package directory').option('--format <format>', 'text or json', 'text').action(async (path, options) => {
+    try {
+      const report = await verifyPackage(resolve(path));
+      printReport(report, options.format);
+      process.exitCode = report.valid ? 0 : 1;
+    } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; }
+  });
+program.command('pack').description('Pin every package document by digest in manifest.ols.json and recompute the package digest')
+  .argument('<path>', 'package directory').option('--stdout', 'print the packed manifest instead of writing it').action(async (path, options) => {
+    try {
+      const manifest = await packPackage(resolve(path), { write: !options.stdout });
+      process.stdout.write(options.stdout ? `${JSON.stringify(manifest, null, 2)}\n` : `${String(manifest.digest)}\n`);
+    } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; }
+  });
 program.command('schemas').command('refresh').option('--cache <path>', 'schema cache directory', resolve(homedir(), '.cache', 'ols', 'schemas')).action(async (options) => {
   try { const registry = await SchemaRegistry.bundled(); await registry.refresh(options.cache); }
   catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; }

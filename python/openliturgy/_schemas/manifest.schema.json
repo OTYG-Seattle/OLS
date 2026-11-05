@@ -34,8 +34,31 @@
     "files": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "$ref": "#/$defs/Digest"
+              },
+              "mediaType": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        ]
       }
     },
     "package": {
@@ -81,6 +104,10 @@
         "type": "string"
       },
       "uniqueItems": true
+    },
+    "digest": {
+      "$ref": "#/$defs/Digest",
+      "description": "Digest of the canonical manifest without digest and signatures. Written by `ols pack`."
     }
   },
   "required": [
@@ -388,6 +415,11 @@
         "status"
       ],
       "additionalProperties": true
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 digest: of canonical JSON (RFC 8785 + NFC) for OLS documents, of raw bytes for assets."
     }
   },
   "x-ols-schema-source": "synthesized",

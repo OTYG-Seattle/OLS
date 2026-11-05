@@ -33,6 +33,17 @@
     },
     "kind": {
       "$ref": "#/$defs/AssetType"
+    },
+    "digest": {
+      "$ref": "#/$defs/Digest"
+    },
+    "mediaType": {
+      "type": "string",
+      "pattern": "^[a-z]+/[A-Za-z0-9.+-]+$"
+    },
+    "byteSize": {
+      "type": "integer",
+      "minimum": 0
     }
   },
   "required": [
@@ -341,6 +352,11 @@
         "status"
       ],
       "additionalProperties": true
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 digest: of canonical JSON (RFC 8785 + NFC) for OLS documents, of raw bytes for assets."
     }
   },
   "x-ols-schema-source": "synthesized",

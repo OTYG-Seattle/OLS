@@ -38,6 +38,7 @@
     "test": "npm run test --workspaces --if-present && python -m pytest python/tests",
     "test:parity": "node tools/parity-test.mjs",
     "schemas:check": "node tools/check-schemas.mjs",
+    "schemas:provenance": "node tools/update-schema-provenance.mjs",
     "lint": "astro check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

@@ -1,18 +1,22 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import Ajv2020Import, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js';
 import addFormatsImport from 'ajv-formats';
 import { listSchemas, loadSchema } from '@openliturgy/schemas';
 import type { Diagnostic, JsonValue, LoadedDocument, OlsDocument, ValidationLayer, ValidationReport } from '@openliturgy/types';
 export type { Diagnostic, LoadedDocument, OlsDocument, ValidationReport } from '@openliturgy/types';
+import { bytesDigest, canonicalDigest, isPackageRelativeUri, manifestFileEntries, packageDigest } from './integrity.js';
+export * from './integrity.js';
 type AjvLike = { addSchema(schema: object, id: string): void; getSchema(id: string): ValidateFunction | undefined };
 
 const layerOrder: ValidationLayer[] = ['parse', 'schema-selection', 'structural', 'consistency', 'references', 'semantic'];
 const normalizePath = (value: string) => value.replaceAll('\\', '/');
+// Code-unit order (not localeCompare) so TypeScript and Python sort diagnostics identically.
+const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const diagnosticSort = (a: Diagnostic, b: Diagnostic) =>
-  layerOrder.indexOf(a.layer) - layerOrder.indexOf(b.layer) || a.source.localeCompare(b.source) ||
-  a.jsonPointer.localeCompare(b.jsonPointer) || a.code.localeCompare(b.code);
+  layerOrder.indexOf(a.layer) - layerOrder.indexOf(b.layer) || compareText(a.source, b.source) ||
+  compareText(a.jsonPointer, b.jsonPointer) || compareText(a.code, b.code);
 
 export class SchemaRegistry {
   readonly schemas = new Map<string, Record<string, unknown>>();
@@ -359,23 +363,23 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
       if (packageLicense && typeof license === 'string' && license !== packageLicense && !allowedLicenses.has(license)) diagnostics.push({ layer: 'semantic', source: entity.source, entityId: String(entity.value.id), jsonPointer: `${entity.pointer}/license`, code: 'OLS_LICENSE_BROADENED', message: `License override ${license} is not permitted by the manifest.`, severity: 'error' });
     }
 
-    const manifestFiles = manifest.files as string[] ?? [];
-    const absoluteManifestFiles = new Set(manifestFiles.map(f => normalizePath(resolve(root, f))));
+    const manifestFiles = manifestFileEntries(manifest.files);
+    const absoluteManifestFiles = new Set(manifestFiles.map((entry) => normalizePath(resolve(root, entry.path))));
     const manifestSource = normalizePath(resolve(root, 'manifest.ols.json'));
 
-    for (const file of manifestFiles) {
-      const absPath = normalizePath(resolve(root, file));
+    manifestFiles.forEach((entry, i) => {
+      const absPath = normalizePath(resolve(root, entry.path));
       if (!documents.some(d => d.source === absPath)) {
         diagnostics.push({
           layer: 'consistency',
           source: manifestSource,
-          jsonPointer: `/files/${manifestFiles.indexOf(file)}`,
+          jsonPointer: `/files/${i}`,
           code: 'OLS_MANIFEST_FILE_NOT_FOUND',
-          message: `Declared file ${file} does not exist in the package.`,
+          message: `Declared file ${entry.path} does not exist in the package.`,
           severity: 'error'
         });
       }
-    }
+    });
 
     for (const document of documents) {
       if (document.source === manifestSource) continue;
@@ -391,6 +395,7 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
       }
     }
   }
+  diagnostics.push(...await integrityDiagnostics(root, documents, entities, false));
   const graph = new Map<string, string[]>();
   for (const entity of entities) {
     const nested = [...walk(entity.value, entity.source).refs.map((item) => String(item.value.$ref)), ...referenceSites([entity], []).map((site) => site.value)].map((value) => resolveReference(value, index, absoluteRoot, entity.source, packageName)).filter((item): item is EntityLocation => item !== undefined).map((item) => String(item.value.id));
@@ -416,6 +421,105 @@ export async function validatePackage(root: string, registry?: SchemaRegistry): 
     if (overlap && a.priority === b.priority && a.priorityClass === b.priorityClass) diagnostics.push({ layer: 'semantic', source: propers[right]!.source, entityId: String(b.id), jsonPointer: propers[right]!.pointer, code: 'OLS_CALENDAR_DETERMINISM_UNPROVEN', message: `Proper ${a.id} ties with ${b.id}; an explicit conflict rule or fixture is required.`, severity: 'warning' });
   }
   return report(diagnostics, documents.map((item) => item.source), versions);
+}
+
+/**
+ * Integrity checks shared by `validatePackage` (strict = false: verify the digests that are
+ * declared) and `verifyPackage` (strict = true: additionally require every document and the
+ * package itself to be pinned).
+ */
+async function integrityDiagnostics(root: string, documents: LoadedDocument[], entities: EntityLocation[], strict: boolean): Promise<Diagnostic[]> {
+  const diagnostics: Diagnostic[] = [];
+  const absoluteRoot = resolve(root);
+  const manifestSource = normalizePath(resolve(absoluteRoot, 'manifest.ols.json'));
+  const manifest = documents.find((d) => d.source === manifestSource)?.data as Record<string, unknown> | undefined;
+  if (!manifest) return diagnostics;
+  const entries = manifestFileEntries(manifest.files);
+  const pinned = new Set<string>();
+  entries.forEach((entry, i) => {
+    const source = normalizePath(resolve(absoluteRoot, entry.path));
+    const document = documents.find((d) => d.source === source);
+    if (!entry.digest || !document || document.raw === null) return;
+    pinned.add(source);
+    const actual = canonicalDigest(document.raw);
+    if (actual !== entry.digest) diagnostics.push({ layer: 'consistency', source: manifestSource, jsonPointer: `/files/${i}/digest`, code: 'OLS_FILE_DIGEST_MISMATCH', message: `${entry.path} has digest ${actual}, but the manifest declares ${entry.digest}.`, severity: 'error' });
+  });
+  if (typeof manifest.digest === 'string') {
+    const actual = packageDigest(manifest);
+    if (actual !== manifest.digest) diagnostics.push({ layer: 'consistency', source: manifestSource, jsonPointer: '/digest', code: 'OLS_PACKAGE_DIGEST_MISMATCH', message: `The package digest is ${actual}, but the manifest declares ${manifest.digest}.`, severity: 'error' });
+  } else if (strict) {
+    diagnostics.push({ layer: 'consistency', source: manifestSource, jsonPointer: '', code: 'OLS_PACKAGE_DIGEST_MISSING', message: 'The manifest does not declare a package digest; run `ols pack`.', severity: 'error' });
+  }
+  if (strict) {
+    for (const document of documents) {
+      if (document.source === manifestSource || pinned.has(document.source)) continue;
+      diagnostics.push({ layer: 'consistency', source: document.source, jsonPointer: '', code: 'OLS_FILE_UNPINNED', message: 'The manifest does not declare a digest for this file; run `ols pack`.', severity: 'error' });
+    }
+  }
+  for (const entity of entities) {
+    if (entity.value.type !== 'asset' || typeof entity.value.uri !== 'string' || !isPackageRelativeUri(entity.value.uri)) continue;
+    const uri = entity.value.uri.split(/[?#]/, 1)[0]!;
+    const target = resolve(absoluteRoot, decodeURI(uri));
+    const rel = relative(absoluteRoot, target);
+    const entityId = String(entity.value.id);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      diagnostics.push({ layer: 'references', source: entity.source, entityId, jsonPointer: `${entity.pointer}/uri`, code: 'OLS_REF_PATH_ESCAPE', message: `Asset URI ${entity.value.uri} resolves outside the package root.`, severity: 'error' });
+      continue;
+    }
+    let bytes: Buffer;
+    try { if (!(await stat(target)).isFile()) throw new Error('not a file'); bytes = await readFile(target); }
+    catch {
+      diagnostics.push({ layer: 'references', source: entity.source, entityId, jsonPointer: `${entity.pointer}/uri`, code: 'OLS_ASSET_NOT_FOUND', message: `Asset file ${entity.value.uri} is not in the package.`, severity: 'warning' });
+      continue;
+    }
+    if (typeof entity.value.byteSize === 'number' && entity.value.byteSize !== bytes.length) diagnostics.push({ layer: 'consistency', source: entity.source, entityId, jsonPointer: `${entity.pointer}/byteSize`, code: 'OLS_ASSET_SIZE_MISMATCH', message: `Asset file is ${bytes.length} bytes, but byteSize declares ${entity.value.byteSize}.`, severity: 'error' });
+    if (typeof entity.value.digest === 'string') {
+      const actual = bytesDigest(bytes);
+      if (actual !== entity.value.digest) diagnostics.push({ layer: 'consistency', source: entity.source, entityId, jsonPointer: `${entity.pointer}/digest`, code: 'OLS_ASSET_DIGEST_MISMATCH', message: `Asset file has digest ${actual}, but the record declares ${entity.value.digest}.`, severity: 'error' });
+    } else if (strict) {
+      diagnostics.push({ layer: 'consistency', source: entity.source, entityId, jsonPointer: entity.pointer, code: 'OLS_ASSET_UNPINNED', message: 'Package-local asset has no digest.', severity: 'error' });
+    }
+  }
+  return diagnostics;
+}
+
+/** Integrity-only verification: every document, package-local asset, and the package itself must be pinned and match. */
+export async function verifyPackage(root: string): Promise<ValidationReport> {
+  const documents = await loadPackage(root);
+  const entities: EntityLocation[] = [];
+  for (const document of documents) if (document.data) walk(document.data, document.source, '', entities, []);
+  const diagnostics = await integrityDiagnostics(root, documents, entities, true);
+  if (!documents.some((d) => d.data?.type === 'manifest')) diagnostics.push({ layer: 'consistency', source: normalizePath(resolve(root, 'manifest.ols.json')), jsonPointer: '', code: 'OLS_MANIFEST_MISSING', message: 'Package is missing manifest.ols.json.', severity: 'error' });
+  return report(diagnostics, documents.map((item) => item.source), []);
+}
+
+/**
+ * Pins every package document in the manifest: `files` becomes `{ path, digest }` entries for all
+ * documents (sorted by path, keeping any declared `mediaType`) and `digest` is recomputed.
+ * Returns the new manifest; writes it to `manifest.ols.json` unless `write` is false.
+ */
+export async function packPackage(root: string, options: { write?: boolean } = {}): Promise<Record<string, unknown>> {
+  const absoluteRoot = resolve(root);
+  const manifestPath = resolve(absoluteRoot, 'manifest.ols.json');
+  const documents = await loadPackage(absoluteRoot);
+  const manifestDocument = documents.find((d) => d.source === normalizePath(manifestPath));
+  if (!manifestDocument?.raw || typeof manifestDocument.raw !== 'object' || Array.isArray(manifestDocument.raw)) throw new Error('Package is missing a readable manifest.ols.json.');
+  const manifest = { ...(manifestDocument.raw as Record<string, unknown>) };
+  const previous = new Map(manifestFileEntries(manifest.files).map((entry) => [entry.path, entry]));
+  const files = documents
+    .filter((d) => d !== manifestDocument)
+    .map((d) => {
+      if (d.raw === null) throw new Error(`${d.source} is not valid JSON.`);
+      const path = normalizePath(relative(absoluteRoot, d.source));
+      const mediaType = previous.get(path)?.mediaType;
+      return { path, digest: canonicalDigest(d.raw), ...(mediaType ? { mediaType } : {}) };
+    })
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  manifest.files = files;
+  delete manifest.digest;
+  manifest.digest = packageDigest(manifest);
+  if (options.write !== false) await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifest;
 }
 
 export async function runSelfTests(root: string): Promise<ValidationReport> {

@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 
 ## [Unreleased]
 
+### Added
+
+- **Canonical form and content digests.** OLS canonical JSON is RFC 8785 (JCS) after Unicode NFC normalization, with shared test vectors in `fixtures/canonical/vectors.json`. `canonicalize`, `canonicalDigest`, and `packageDigest` (Python: `canonicalize`, `canonical_digest`, `package_digest`) are exported by both SDKs.
+- `manifest.files` entries may be `{ path, digest, mediaType }`. `manifest.digest` pins the whole package. Assets accept `digest`, `byteSize`, and `mediaType`.
+- `validatePackage` checks every declared digest (`OLS_FILE_DIGEST_MISMATCH`, `OLS_PACKAGE_DIGEST_MISMATCH`, `OLS_ASSET_DIGEST_MISMATCH`, `OLS_ASSET_SIZE_MISMATCH`) and warns about missing package-local asset files (`OLS_ASSET_NOT_FOUND`).
+- `ols pack` / `packPackage` / `pack_package` pin every document and recompute the package digest. `ols verify` / `verifyPackage` / `verify_package` additionally require everything to be pinned (`OLS_FILE_UNPINNED`, `OLS_ASSET_UNPINNED`, `OLS_PACKAGE_DIGEST_MISSING`).
+- New *Sharing & Distribution* docs category with an *Integrity & Canonical Form* article.
+- `npm run schemas:provenance` recomputes schema provenance digests and syncs the Python schema copy.
+
+### Changed
+
+- TypeScript diagnostics are sorted by UTF-16 code unit instead of `localeCompare`, matching Python's ordering exactly.
+- The parity gate compares `ols verify` reports and byte-for-byte `ols pack --stdout` output.
+
 ### Fixed
 
 - **Cross-package references no longer resolve to same-named local entities.** In both SDKs, `<package>:<id>` now resolves locally only when `<package>` is the manifest's own `package`. A reference into a declared dependency reports `OLS_REF_EXTERNAL` (info), and a reference into an undeclared package reports only `OLS_DEPENDENCY_UNDECLARED`, no longer alongside a duplicate `OLS_REF_UNRESOLVED`. `resolveReference` / `resolve_reference` take an optional package name, and a new `packageQualifier` / `package_qualifier` helper splits qualified references.

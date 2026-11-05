@@ -1,9 +1,9 @@
-import { glob, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { cp, glob, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { resolveReference, SchemaRegistry, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
+import { canonicalDigest, canonicalize, packPackage, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), '../../../fixtures');
 
@@ -216,5 +216,34 @@ describe('documentation examples', () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+});
+
+describe('canonical form and integrity', () => {
+  it('matches the shared canonicalization vectors', async () => {
+    const vectors = JSON.parse(await readFile(join(fixtures, 'canonical/vectors.json'), 'utf8')) as Array<{ name: string; input: string; canonical: string }>;
+    for (const vector of vectors) expect(canonicalize(JSON.parse(vector.input)), vector.name).toBe(vector.canonical);
+  });
+
+  it('gives the same digest regardless of formatting, member order, or Unicode normalization', () => {
+    const composed = { text: { en: 'église' }, id: 'x' };
+    const decomposed = JSON.parse('{ "id" : "x", "text": { "en": "e\u0301glise" } }');
+    expect(canonicalDigest(decomposed)).toBe(canonicalDigest(composed));
+  });
+
+  it('verifies the pinned fixture and detects tampering', async () => {
+    expect((await verifyPackage(join(fixtures, 'integrity'))).valid).toBe(true);
+    const codes = (await verifyPackage(join(fixtures, 'integrity-tampered'))).diagnostics.map((d) => d.code).sort();
+    expect(codes).toEqual(['OLS_ASSET_DIGEST_MISMATCH', 'OLS_ASSET_SIZE_MISMATCH', 'OLS_FILE_DIGEST_MISMATCH']);
+  });
+
+  it('packs an unpinned package so that it verifies', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ols-pack-'));
+    await cp(join(fixtures, 'complete-minimal'), directory, { recursive: true });
+    expect((await verifyPackage(directory)).valid).toBe(false);
+    const manifest = await packPackage(directory);
+    expect(manifest.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect((await verifyPackage(directory)).valid).toBe(true);
+    expect((await validatePackage(directory)).valid).toBe(true);
   });
 });
