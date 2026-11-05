@@ -1,0 +1,26 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/catalog.schema.json",
+  "ols_version": "1.1.0",
+  "type": "catalog",
+  "publisher": {
+    "name": "OpenLiturgy demo publisher",
+    "url": "https://example.org/",
+    "sameAs": ["https://authority.example.org/organizations/openliturgy-demo"]
+  },
+  "updated": "2026-11-05T12:00:00Z",
+  "packages": [
+    {
+      "package": "org.openliturgy.integrity-demo",
+      "title": { "en": "Integrity demo package" },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "digest": "sha256:0981af841724d4fa0bd3618bd7d24b14aeb73ad70c38093ea8e09cba5d817cc9",
+          "url": "https://example.org/packages/org.openliturgy.integrity-demo/1.0.0/",
+          "published": "2026-11-05",
+          "status": "current"
+        }
+      ]
+    }
+  ]
+}

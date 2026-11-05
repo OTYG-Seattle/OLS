@@ -21,7 +21,7 @@ ols = "openliturgy.cli:main"
 packages = ["openliturgy"]
 
 [tool.hatch.build]
-include = ["openliturgy/**/*.py", "openliturgy/_schemas/*.json"]
+include = ["openliturgy/**/*.py", "openliturgy/_schemas/*.json", "openliturgy/_schemas/*.jsonld"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

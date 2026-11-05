@@ -11,7 +11,7 @@ The site is built as a highly performant static documentation portal using **Ast
 
 ## Architecture & Section Hierarchy
 
-The specification is modularly divided into 43 documentation files (`.mdx`) and organized across 3 parent categories and 10 sub-categories:
+The specification is modularly divided into 44 documentation files (`.mdx`) and organized across 3 parent categories and 10 sub-categories:
 
 1. **Specification**
    - **Introduction**: Release overview, document status, scope rules, package layout, and referencing.
@@ -24,7 +24,7 @@ The specification is modularly divided into 43 documentation files (`.mdx`) and 
 3. **Advanced & Profiles**
    - **Scholarly & Media**: Variants, apparatus, teaching annotations, commentary, and assets references.
    - **Schemas & Governance**: JSON schema verification, conformance levels (L0 to L7), test fixtures, and technical governance.
-   - **Sharing & Distribution**: Canonical JSON, content digests, the `ols pack` / `ols verify` integrity workflow, and dependency locking with `ols lock`.
+   - **Sharing & Distribution**: Canonical JSON, content digests, the `ols pack` / `ols verify` integrity workflow, dependency locking with `ols lock`, the JSON-LD context, PROV-O mapping, and publisher catalogs.
    - **Profiles & Examples**: EOTC Profile v1, Oriental Orthodox layers, bibliography references, and a complete corpus JSON example.
 
 ---
@@ -87,6 +87,8 @@ Both distributions expose `ols validate PATH`, `ols validate PATH --self-test`, 
 Every public page embeds page-specific [Schema.org](https://schema.org/) JSON-LD, including its canonical URL and breadcrumb hierarchy. The generated [schema.json](https://ols.otyg.org/schema.json) endpoint provides the complete site graph for the organization, website, OLS standard, parent sections, categories, and all published technical articles. Because it is generated from the Astro content collection, it stays synchronized as documentation pages are added, archived, or reorganized.
 
 Specification articles that define a closed or recommended vocabulary display a **Supported values** section with every documented value and a direct link to its definition in the generated [OLS vocabulary schema](https://ols.otyg.org/schema/v1.0/corpus.schema.json). Closed enums and open recommendation lists are explicitly distinguished. The site footer opens this OLS schema in a new tab from every page.
+
+The OLS JSON-LD context at `/schema/v1.0/context.jsonld` lets any OLS document be read as linked data (language-tagged text, entity links, `owl:sameAs`, PROV-O provenance).
 
 Each modeled entity also has a standalone Draft 2020-12 validator, such as `/schema/v1.0/localized-text.schema.json`, `/schema/v1.0/utterance.schema.json`, and `/schema/v1.0/rubric.schema.json`. Relevant documentation pages link directly to every entity schema they document.
 

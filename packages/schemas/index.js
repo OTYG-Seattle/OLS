@@ -12,3 +12,8 @@ export async function loadSchema(name) {
   const filename = name.endsWith('.schema.json') ? name : `${name}.schema.json`;
   return JSON.parse(await readFile(join(schemaDirectory, filename), 'utf8'));
 }
+
+/** The OLS JSON-LD context (`@context` document) that maps OLS JSON to linked data. */
+export async function loadContext() {
+  return JSON.parse(await readFile(join(schemaDirectory, 'context.jsonld'), 'utf8'));
+}

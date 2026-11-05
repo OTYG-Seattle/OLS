@@ -1,0 +1,291 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "@vocab": "https://ols.otyg.org/vocab#",
+    "ols": "https://ols.otyg.org/vocab#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "prov": "http://www.w3.org/ns/prov#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "schema": "https://schema.org/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "id": "@id",
+    "type": "@type",
+    "$ref": "@id",
+    "$schema": null,
+    "ols_version": "ols:olsVersion",
+    "kind": {
+      "@id": "ols:kind",
+      "@type": "@vocab"
+    },
+    "label": {
+      "@id": "rdfs:label",
+      "@container": "@language"
+    },
+    "title": {
+      "@id": "dcterms:title",
+      "@container": "@language"
+    },
+    "name": {
+      "@id": "schema:name",
+      "@container": "@language"
+    },
+    "text": {
+      "@id": "ols:text",
+      "@container": "@language"
+    },
+    "summary": {
+      "@id": "dcterms:abstract",
+      "@container": "@language"
+    },
+    "notes": {
+      "@id": "rdfs:comment",
+      "@container": "@language"
+    },
+    "activePropers": {
+      "@id": "ols:activePropers",
+      "@type": "@id"
+    },
+    "actors": {
+      "@id": "ols:actors",
+      "@type": "@id"
+    },
+    "affiliation": {
+      "@id": "schema:affiliation",
+      "@type": "@id"
+    },
+    "author": {
+      "@id": "dcterms:creator",
+      "@type": "@id"
+    },
+    "base": {
+      "@id": "ols:base",
+      "@type": "@id"
+    },
+    "blocks": {
+      "@id": "ols:blocks",
+      "@type": "@id"
+    },
+    "citation": {
+      "@id": "dcterms:source",
+      "@type": "@id"
+    },
+    "editors": {
+      "@id": "ols:editor",
+      "@type": "@id"
+    },
+    "from": {
+      "@id": "ols:from",
+      "@type": "@id"
+    },
+    "inherits": {
+      "@id": "ols:inherits",
+      "@type": "@id"
+    },
+    "linkedTo": {
+      "@id": "dcterms:relation",
+      "@type": "@id"
+    },
+    "object": {
+      "@id": "ols:object",
+      "@type": "@id"
+    },
+    "ordo": {
+      "@id": "ols:ordo",
+      "@type": "@id"
+    },
+    "ordos": {
+      "@id": "ols:ordos",
+      "@type": "@id"
+    },
+    "overrides": {
+      "@id": "ols:overrides",
+      "@type": "@id"
+    },
+    "path": {
+      "@id": "ols:path",
+      "@type": "@id"
+    },
+    "provenance": {
+      "@id": "prov:wasGeneratedBy",
+      "@type": "@id"
+    },
+    "readings": {
+      "@id": "ols:readings",
+      "@type": "@id"
+    },
+    "reviewedBy": {
+      "@id": "ols:reviewer",
+      "@type": "@id"
+    },
+    "reviewers": {
+      "@id": "ols:reviewer",
+      "@type": "@id"
+    },
+    "role": {
+      "@id": "ols:role",
+      "@type": "@id"
+    },
+    "roles": {
+      "@id": "ols:roles",
+      "@type": "@id"
+    },
+    "sections": {
+      "@id": "ols:sections",
+      "@type": "@id"
+    },
+    "source": {
+      "@id": "prov:wasDerivedFrom",
+      "@type": "@id"
+    },
+    "target": {
+      "@id": "ols:target",
+      "@type": "@id"
+    },
+    "to": {
+      "@id": "ols:to",
+      "@type": "@id"
+    },
+    "transcriber": {
+      "@id": "ols:transcriber",
+      "@type": "@id"
+    },
+    "translator": {
+      "@id": "ols:translator",
+      "@type": "@id"
+    },
+    "winner": {
+      "@id": "ols:winner",
+      "@type": "@id"
+    },
+    "sameAs": {
+      "@id": "owl:sameAs",
+      "@type": "@id"
+    },
+    "uri": {
+      "@id": "schema:contentUrl",
+      "@type": "@id"
+    },
+    "iiif": {
+      "@id": "ols:iiif",
+      "@context": {
+        "manifest": {
+          "@id": "ols:iiifManifest",
+          "@type": "@id"
+        },
+        "canvas": {
+          "@id": "ols:iiifCanvas",
+          "@type": "@id"
+        },
+        "region": "ols:iiifRegion"
+      }
+    },
+    "license": "dcterms:license",
+    "version": "schema:version",
+    "publisher": "dcterms:publisher",
+    "mediaType": "dcterms:format",
+    "byteSize": {
+      "@id": "ols:byteSize",
+      "@type": "xsd:integer"
+    },
+    "digest": "ols:digest",
+    "lastReviewed": {
+      "@id": "ols:lastReviewed",
+      "@type": "xsd:date"
+    },
+    "access": {
+      "@id": "ols:access",
+      "@type": "@json"
+    },
+    "aliases": {
+      "@id": "ols:aliases",
+      "@type": "@json"
+    },
+    "cast": {
+      "@id": "ols:cast",
+      "@type": "@json"
+    },
+    "conditions": {
+      "@id": "ols:conditions",
+      "@type": "@json"
+    },
+    "content": {
+      "@id": "ols:content",
+      "@type": "@json"
+    },
+    "expectedErrors": {
+      "@id": "ols:expectedErrors",
+      "@type": "@json"
+    },
+    "fills": {
+      "@id": "ols:fills",
+      "@type": "@json"
+    },
+    "instance": {
+      "@id": "ols:instance",
+      "@type": "@json"
+    },
+    "levels": {
+      "@id": "ols:levels",
+      "@type": "@json"
+    },
+    "metadata": {
+      "@id": "ols:metadata",
+      "@type": "@json"
+    },
+    "mutations": {
+      "@id": "ols:mutations",
+      "@type": "@json"
+    },
+    "packages": {
+      "@id": "ols:packages",
+      "@type": "@json"
+    },
+    "performance": {
+      "@id": "ols:performance",
+      "@type": "@json"
+    },
+    "privacy": {
+      "@id": "ols:privacy",
+      "@type": "@json"
+    },
+    "reference": {
+      "@id": "ols:reference",
+      "@type": "@json"
+    },
+    "requires": {
+      "@id": "ols:requires",
+      "@type": "@json"
+    },
+    "scope": {
+      "@id": "ols:scope",
+      "@type": "@json"
+    },
+    "sets": {
+      "@id": "ols:sets",
+      "@type": "@json"
+    },
+    "stateTransition": {
+      "@id": "ols:stateTransition",
+      "@type": "@json"
+    },
+    "traditions": {
+      "@id": "ols:traditions",
+      "@type": "@json"
+    },
+    "value": {
+      "@id": "ols:value",
+      "@type": "@json"
+    },
+    "variants": {
+      "@id": "ols:variants",
+      "@type": "@json"
+    },
+    "person": {
+      "@id": "ols:person",
+      "@context": {
+        "roles": "ols:personRole"
+      }
+    }
+  }
+}

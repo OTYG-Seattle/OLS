@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import jsonld from 'jsonld';
+import { loadContext } from '@openliturgy/schemas';
 import { canonicalDigest, canonicalize, lockPackage, packPackage, versionSatisfies, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), '../../../fixtures');
@@ -294,5 +296,40 @@ describe('dependencies and aliases', () => {
     expect(versionSatisfies('1.2.0', '1.2')).toBe(true);
     expect(versionSatisfies('10.0.0', '1')).toBe(false);
     expect(versionSatisfies('1.3.0', '1.2')).toBe(false);
+  });
+});
+
+describe('JSON-LD context', () => {
+  const vocab = 'https://ols.otyg.org/vocab#';
+  const expand = async (document: Record<string, unknown>) => jsonld.expand({ '@context': (await loadContext())['@context'], ...document }) as Promise<Array<Record<string, unknown>>>;
+
+  it('expands every fixture document without errors', async () => {
+    for await (const file of glob('**/*.json', { cwd: fixtures })) {
+      if (file.includes('canonical/') || file.endsWith('.expected.json') || file.endsWith('ols.lock.json')) continue;
+      const document = JSON.parse(await readFile(join(fixtures, file), 'utf8'));
+      await expect(expand(document), file).resolves.toBeDefined();
+    }
+  });
+
+  it('expands the complete corpus example in the spec', async () => {
+    const article = await readFile(resolve(fixtures, '../src/content/docs/profiles-examples/example/example.mdx'), 'utf8');
+    const [corpus] = await expand(JSON.parse(/```json\n([\s\S]*?)```/.exec(article)![1]!));
+    expect(corpus!['@id']).toBe('eotc-kidase-demo-v1');
+  });
+
+  it('keeps person roles as literals but links affiliations', async () => {
+    const [person] = await expand({ id: 'person-1', type: 'person', roles: ['priest'], affiliation: 'org-1' });
+    expect(person![`${vocab}personRole`]).toEqual([{ '@value': 'priest' }]);
+    expect(person!['https://schema.org/affiliation']).toEqual([{ '@id': 'org-1' }]);
+  });
+
+  it('maps localized text to language maps and ID fields to node references', async () => {
+    const [corpus] = await expand(JSON.parse(await readFile(join(fixtures, 'cross-package/corpus.ols.json'), 'utf8')));
+    expect(corpus!['@type']).toEqual([`${vocab}corpus`]);
+    const section = (corpus![`${vocab}sections`] as Array<Record<string, unknown>>)[0]!;
+    // JSON-LD processors may lowercase language tags; BCP 47 tags compare case-insensitively.
+    const [label] = section['http://www.w3.org/2000/01/rdf-schema#label'] as Array<{ '@value': string; '@language': string }>;
+    expect([label!['@value'], label!['@language'].toLowerCase()]).toEqual(['Word', 'en-us']);
+    expect(section[`${vocab}blocks`]).toContainEqual({ '@id': 'org.openliturgy.dep:block-kyrie' });
   });
 });
