@@ -312,7 +312,7 @@ describe('JSON-LD context', () => {
   });
 
   it('expands the complete corpus example in the spec', async () => {
-    const article = await readFile(resolve(fixtures, '../src/content/docs/profiles-examples/example/example.mdx'), 'utf8');
+    const article = (await readFile(resolve(fixtures, '../src/content/docs/profiles-examples/example/example.mdx'), 'utf8')).replaceAll('\r\n', '\n');
     const [corpus] = await expand(JSON.parse(/```json\n([\s\S]*?)```/.exec(article)![1]!));
     expect(corpus!['@id']).toBe('eotc-kidase-demo-v1');
   });
