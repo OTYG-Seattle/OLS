@@ -9,7 +9,12 @@ from .schemas import SchemaRegistry
 from .trust import generate_signing_key
 from .validation import (
     LAYERS,
+    apply_overlay,
+    create_overlay,
+    diff_packages,
     lock_package,
+    merge_packages,
+    migrate_package,
     pack_package,
     run_self_tests,
     sign_approval,
@@ -46,6 +51,22 @@ def main(argv: list[str] | None = None) -> int:
     lock.add_argument("path")
     lock.add_argument("--packages-dir", default="ols_packages")
     lock.add_argument("--stdout", action="store_true")
+    diff = commands.add_parser("diff")
+    diff.add_argument("base")
+    diff.add_argument("other")
+    diff.add_argument("--overlay")
+    apply = commands.add_parser("apply")
+    apply.add_argument("overlay")
+    apply.add_argument("--base", required=True)
+    apply.add_argument("--out", required=True)
+    merge = commands.add_parser("merge")
+    merge.add_argument("base")
+    merge.add_argument("ours")
+    merge.add_argument("theirs")
+    merge.add_argument("--out", required=True)
+    migrate = commands.add_parser("migrate")
+    migrate.add_argument("path")
+    migrate.add_argument("--dry-run", action="store_true")
     schemas = commands.add_parser("schemas")
     schema_commands = schemas.add_subparsers(dest="schema_command", required=True)
     refresh = schema_commands.add_parser("refresh")
@@ -54,6 +75,25 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "schemas":
             SchemaRegistry.bundled().refresh(args.cache)
+            return 0
+        if args.command == "diff":
+            base, other = Path(args.base).resolve(), Path(args.other).resolve()
+            result: object = create_overlay(base, other, args.overlay) if args.overlay else diff_packages(base, other)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "apply":
+            overlay = json.loads(Path(args.overlay).read_text(encoding="utf-8"))
+            print(apply_overlay(overlay, args.base, args.out)["digest"])
+            return 0
+        if args.command == "merge":
+            merged = merge_packages(args.base, args.ours, args.theirs, args.out)
+            if merged["merged"]:
+                print(merged["manifest"]["digest"])
+                return 0
+            print(json.dumps({"conflicts": merged["conflicts"]}, indent=2, ensure_ascii=False))
+            return 1
+        if args.command == "migrate":
+            print(json.dumps(migrate_package(args.path, write=not args.dry_run), indent=2, ensure_ascii=False))
             return 0
         if args.command == "keygen":
             private_key_pem, public_key = generate_signing_key()

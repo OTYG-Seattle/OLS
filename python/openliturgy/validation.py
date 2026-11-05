@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
+from .changes import ChangeError, apply_changes, combine_changes, diff_values, escape_token, target_operations
 from .integrity import (
     bytes_digest,
     canonical_digest,
@@ -171,12 +173,12 @@ def _walk(value: Any, source: str, pointer: str = "") -> tuple[list[dict[str, An
         if isinstance(value.get("$ref"), str):
             refs.append({"value": value, "source": source, "pointer": pointer})
         for key, child in value.items():
-            if key != "$ref":
-                child_entities, child_refs = _walk(
-                    child, source, f"{pointer}/{key.replace('~', '~0').replace('/', '~1')}"
-                )
-                entities.extend(child_entities)
-                refs.extend(child_refs)
+            # Overlay operations carry entities of another package as payload; they are not part of this one.
+            if key == "$ref" or (key == "operations" and value.get("type") == "overlay"):
+                continue
+            child_entities, child_refs = _walk(child, source, f"{pointer}/{key.replace('~', '~0').replace('/', '~1')}")
+            entities.extend(child_entities)
+            refs.extend(child_refs)
     return entities, refs
 
 
@@ -435,6 +437,8 @@ def _load_dependencies(
             ids.add(str(entity["value"]["id"]))
         loaded[name] = {
             "version": str(dependency_manifest.get("version")),
+            "digest": actual,
+            "root": directory,
             "ids": ids,
             "aliases": _string_record(dependency_manifest.get("aliases")),
         }
@@ -736,6 +740,7 @@ def validate_package(
                         severity="error",
                     )
                 )
+    diagnostics.extend(_overlay_diagnostics(documents, dependency_packages))
     diagnostics.extend(_integrity_diagnostics(directory, documents, entities, strict=False))
     diagnostics.extend(_trust_diagnostics(directory, documents, keyring, strict=False))
     graph = {
@@ -1298,6 +1303,277 @@ def lock_package(
         if manifest_updated:
             manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return lock, manifest_updated
+
+
+# Change exchange: diff, overlays, merge, migrate. Mirrors the TypeScript SDK.
+
+DERIVED_MANIFEST_KEYS = ("digest", "files", "signatures")
+_MANIFEST_FILE = "manifest.ols.json"
+
+
+def _utf16(text: str) -> bytes:
+    return text.encode("utf-16-be")
+
+
+def _json_text(value: Any) -> str:
+    return json.dumps(value, indent=2, ensure_ascii=False) + "\n"
+
+
+def package_documents(root: str | Path) -> dict[str, Any]:
+    """Package documents keyed by package-relative POSIX path, freshly parsed."""
+    directory = Path(root).resolve()
+    documents: dict[str, Any] = {}
+    for document in load_package(directory):
+        if document.raw is None:
+            raise ValueError(f"{document.source} is not valid JSON.")
+        documents[Path(document.source).relative_to(directory).as_posix()] = _parsed(document)
+    return documents
+
+
+def _comparable(path: str, document: Any) -> Any:
+    if path != _MANIFEST_FILE or not isinstance(document, dict):
+        return document
+    return {key: value for key, value in document.items() if key not in DERIVED_MANIFEST_KEYS}
+
+
+def diff_packages(base: str | Path, other: str | Path) -> list[dict[str, Any]]:
+    """Entity-level change set that turns ``base`` into ``other``. Mirrors ``diffPackages``."""
+    before, after = package_documents(base), package_documents(other)
+    operations: list[dict[str, Any]] = []
+    for path in sorted(set(before) | set(after), key=_utf16):
+        if path not in after:
+            operations.append({"op": "remove", "document": path, "path": ""})
+        elif path not in before:
+            operations.append({"op": "add", "document": path, "path": "", "value": _comparable(path, after[path])})
+        else:
+            a = _comparable(path, before[path])
+            operations.extend(target_operations(path, a, diff_values(a, _comparable(path, after[path]))))
+    return operations
+
+
+def create_overlay(base: str | Path, other: str | Path, overlay_id: str) -> dict[str, Any]:
+    """An overlay carrying ``diff_packages(base, other)``, pinned to the base package. Mirrors ``createOverlay``."""
+    manifest = json.loads((Path(base) / _MANIFEST_FILE).read_text(encoding="utf-8"))
+    return {
+        "$schema": "https://ols.otyg.org/schema/v1.0/overlay.schema.json",
+        "ols_version": manifest["ols_version"] if isinstance(manifest.get("ols_version"), str) else "1.1.0",
+        "type": "overlay",
+        "id": overlay_id,
+        "base": {
+            "package": str(manifest.get("package")),
+            "version": str(manifest.get("version")),
+            "digest": package_digest(manifest),
+        },
+        "operations": diff_packages(base, other),
+    }
+
+
+def _write_documents(out_dir: Path, documents: dict[str, Any], previous: list[str]) -> None:
+    for path in previous:
+        if path not in documents:
+            (out_dir / path).unlink(missing_ok=True)
+    for path, document in documents.items():
+        target = out_dir / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_json_text(document), encoding="utf-8")
+
+
+def _copy_to_empty_output(source: Path, out_dir: Path) -> None:
+    if out_dir.exists() and any(out_dir.iterdir()):
+        raise ValueError(f"Output directory {out_dir} is not empty.")
+    shutil.copytree(source, out_dir, dirs_exist_ok=True)
+
+
+def apply_overlay(overlay: dict[str, Any], base: str | Path, out_dir: str | Path) -> dict[str, Any]:
+    """Apply an overlay to its pinned base package, write the result to ``out_dir``, and pack it."""
+    base_dir, out = Path(base).resolve(), Path(out_dir).resolve()
+    manifest = json.loads((base_dir / _MANIFEST_FILE).read_text(encoding="utf-8"))
+    pinned: dict[str, Any] = overlay["base"] if isinstance(overlay.get("base"), dict) else {}
+    digest = package_digest(manifest)
+    if (
+        pinned.get("package") != manifest.get("package")
+        or pinned.get("version") != manifest.get("version")
+        or pinned.get("digest") != digest
+    ):
+        raise ValueError(
+            f"The overlay was made for {pinned.get('package')}@{pinned.get('version')} ({pinned.get('digest')}), "
+            f"but the base is {manifest.get('package')}@{manifest.get('version')} ({digest})."
+        )
+    documents = package_documents(base_dir)
+    before = list(documents)
+    apply_changes(documents, overlay.get("operations") or [])
+    _copy_to_empty_output(base_dir, out)
+    _write_documents(out, documents, before)
+    return pack_package(out)
+
+
+def _package_assets(root: Path) -> dict[str, bytes]:
+    """Every non-JSON file of a package, keyed by relative path; ``tests/`` and dependencies are excluded."""
+    found: dict[str, bytes] = {}
+    for path in root.rglob("*"):
+        relative = path.relative_to(root)
+        if {"tests", DEFAULT_PACKAGES_DIRECTORY} & set(relative.parts[:-1]) or not path.is_file():
+            continue
+        if not path.name.endswith(".json"):
+            found[relative.as_posix()] = path.read_bytes()
+    return found
+
+
+def merge_packages(base: str | Path, ours: str | Path, theirs: str | Path, out_dir: str | Path) -> dict[str, Any]:
+    """Three-way entity-level merge. Returns ``{"merged", "conflicts", "manifest"?}``. Mirrors ``mergePackages``."""
+    base_dir, ours_dir, theirs_dir, out = (Path(item).resolve() for item in (base, ours, theirs, out_dir))
+    operations, conflicts = combine_changes(diff_packages(base_dir, ours_dir), diff_packages(base_dir, theirs_dir))
+    base_assets, our_assets, their_assets = (_package_assets(item) for item in (base_dir, ours_dir, theirs_dir))
+    assets: dict[str, bytes | None] = {}
+    for path in sorted(set(our_assets) | set(their_assets), key=_utf16):
+        original, mine, other = base_assets.get(path), our_assets.get(path), their_assets.get(path)
+        if mine == other or other == original:
+            assets[path] = mine
+        elif mine == original:
+            assets[path] = other
+        else:
+            conflicts.append({"file": path})
+    if conflicts:
+        return {"merged": False, "conflicts": conflicts}
+    documents = package_documents(base_dir)
+    apply_changes(documents, operations)
+    _copy_to_empty_output(ours_dir, out)
+    _write_documents(out, documents, list(package_documents(ours_dir)))
+    for path, data in assets.items():
+        target = out / path
+        if data is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+    return {"merged": True, "conflicts": [], "manifest": pack_package(out)}
+
+
+def _overlay_diagnostics(documents: list[LoadedDocument], dependencies: dict[str, dict[str, Any]]) -> list[Diagnostic]:
+    """Overlays in a package must apply cleanly to the locked dependency they are pinned to."""
+    diagnostics: list[Diagnostic] = []
+    for document in documents:
+        if not isinstance(document.raw, dict) or document.raw.get("type") != "overlay" or document.data is None:
+            continue
+        overlay = _parsed(document)
+        base = overlay.get("base") if isinstance(overlay.get("base"), dict) else {}
+
+        def push(pointer: str, code: str, message: str, source: str = document.source, entity: str = str(overlay.get("id"))) -> None:
+            diagnostics.append(
+                Diagnostic(
+                    layer="semantic", source=source, entityId=entity, jsonPointer=pointer, code=code, message=message,
+                    severity="error",
+                )
+            )
+
+        dependency = dependencies.get(str(base.get("package")))
+        if dependency is None:
+            push("/base/package", "OLS_OVERLAY_BASE_UNRESOLVED", f"Overlay base {base.get('package')} is not a locked dependency of this package.")
+            continue
+        if base.get("version") != dependency["version"]:
+            push(
+                "/base/version",
+                "OLS_OVERLAY_BASE_MISMATCH",
+                f"Overlay was made for {base.get('package')}@{base.get('version')}, but {dependency['version']} is locked.",
+            )
+        if base.get("digest") != dependency["digest"]:
+            push(
+                "/base/digest",
+                "OLS_OVERLAY_BASE_MISMATCH",
+                f"Overlay was made for package digest {base.get('digest')}, but the locked dependency is {dependency['digest']}.",
+            )
+            continue
+        try:
+            apply_changes(package_documents(dependency["root"]), overlay.get("operations") or [])
+        except ChangeError as error:
+            push("/operations" if error.index is None else f"/operations/{error.index}", "OLS_OVERLAY_CONFLICT", str(error))
+    return diagnostics
+
+
+_CORPUS_COLLECTIONS = {
+    "assets": "asset", "blocks": "block", "calendars": "calendar", "ordos": "ordo", "propers": "proper",
+    "readings": "reading", "roles": "role", "rubrics": "rubric", "sections": "section", "teachingNotes": "teaching-note",
+}
+
+
+def _migrate_document(document: dict[str, Any], source: str, changes: list[dict[str, str]]) -> None:
+    def record(pointer: str, rule: str) -> None:
+        changes.append({"source": source, "pointer": pointer, "rule": rule})
+
+    def fix_type(value: dict[str, Any], expected: str, pointer: str) -> None:
+        if not isinstance(value.get("type"), str) or value["type"] == expected:
+            return
+        if "kind" not in value:
+            value["kind"] = value["type"]
+        value["type"] = expected
+        record(pointer, "type-kind")
+
+    schema = document.get("$schema")
+    match = re.search(r"/([a-z-]+)\.schema\.json$", schema) if isinstance(schema, str) else None
+    if match:
+        fix_type(document, match.group(1), "")
+    if document.get("type") == "corpus":
+        for key, entity_type in _CORPUS_COLLECTIONS.items():
+            items = document.get(key)
+            if isinstance(items, list):
+                for i, item in enumerate(items):
+                    if isinstance(item, dict):
+                        fix_type(item, entity_type, f"/{key}/{i}")
+
+    def visit(value: Any, pointer: str) -> None:
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                visit(item, f"{pointer}/{i}")
+            return
+        if not isinstance(value, dict):
+            return
+        authority = value.get("authority")
+        if document.get("type") != "manifest" and isinstance(authority, dict) and "type" not in authority:
+            authority["type"] = "authority"
+            record(f"{pointer}/authority", "authority-type")
+        if value.get("type") in ("role", "role-group") and "labels" in value and "label" not in value:
+            value["label"] = value.pop("labels")
+            record(pointer, "label-singular")
+        if value.get("type") == "role-group" and "members" in value and "roles" not in value:
+            value["roles"] = value.pop("members")
+            record(pointer, "role-group-roles")
+        for key, child in list(value.items()):
+            visit(child, f"{pointer}/{escape_token(key)}")
+
+    visit(document, "")
+
+    def ref_object(item: Any) -> str | None:
+        return item["$ref"] if isinstance(item, dict) and len(item) == 1 and isinstance(item.get("$ref"), str) else None
+
+    for entity in _walk(document, source)[0]:
+        for field in ID_REFERENCE_FIELDS.get(_entity_type(entity), []):
+            value = entity["value"].get(field)
+            if isinstance(value, list):
+                for i, item in enumerate(value):
+                    target = ref_object(item)
+                    if target is not None:
+                        value[i] = target
+                        record(f"{entity['pointer']}/{field}/{i}", "id-list-ref-object")
+            elif ref_object(value) is not None:
+                entity["value"][field] = ref_object(value)
+                record(f"{entity['pointer']}/{field}", "id-list-ref-object")
+
+
+def migrate_package(path: str | Path, write: bool = True) -> list[dict[str, str]]:
+    """Rewrite documents written against pre-1.1 conventions. Mirrors ``migratePackage``."""
+    target = Path(path).resolve()
+    files = [target / name for name in package_documents(target)] if target.is_dir() else [target]
+    changes: list[dict[str, str]] = []
+    for file in files:
+        document = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            continue
+        source = file.relative_to(target).as_posix() if target.is_dir() else file.name
+        count = len(changes)
+        _migrate_document(document, source, changes)
+        if len(changes) > count and write:
+            file.write_text(_json_text(document), encoding="utf-8")
+    return sorted(changes, key=lambda item: (_utf16(item["source"]), _utf16(item["pointer"]), _utf16(item["rule"])))
 
 
 def validate_translation_variants(data: dict[str, Any], source: str = "<inline>") -> list[Diagnostic]:

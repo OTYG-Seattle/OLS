@@ -1,0 +1,87 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
+  "ols_version": "1.1.0",
+  "type": "corpus",
+  "id": "changes-demo",
+  "roles": [
+    {
+      "type": "role",
+      "id": "role-deacon",
+      "kind": "deacon",
+      "label": {
+        "en": "Deacon"
+      }
+    },
+    {
+      "type": "role",
+      "id": "role-congregation",
+      "kind": "congregation"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "block",
+      "kind": "response",
+      "id": "block-kyrie",
+      "elements": [
+        {
+          "utterance": {
+            "id": "ut-kyrie-call",
+            "roles": [
+              "role-deacon"
+            ],
+            "mode": "chanted",
+            "text": {
+              "en": "Lord, have mercy."
+            }
+          }
+        },
+        {
+          "utterance": {
+            "id": "ut-kyrie-response",
+            "roles": [
+              "role-congregation"
+            ],
+            "mode": "responsive",
+            "text": {
+              "en": "Lord, have mercy.",
+              "am-Ethi": "ጌታ ሆይ፥ ማረን።"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "block",
+      "kind": "response",
+      "id": "block-gloria",
+      "elements": [
+        {
+          "utterance": {
+            "id": "ut-gloria",
+            "roles": [
+              "role-congregation"
+            ],
+            "mode": "sung",
+            "text": {
+              "en": "Glory to God in the highest."
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "type": "section",
+      "id": "sec-word",
+      "label": {
+        "en": "Word"
+      },
+      "blocks": [
+        "block-kyrie",
+        "block-gloria"
+      ]
+    }
+  ]
+}

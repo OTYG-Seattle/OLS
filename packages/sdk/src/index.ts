@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import Ajv2020Import, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js';
 import addFormatsImport from 'ajv-formats';
@@ -10,6 +10,8 @@ import { bytesDigest, canonicalDigest, isPackageRelativeUri, manifestFileEntries
 export * from './integrity.js';
 import { ATTESTED_STATUSES, approvalSignatureMessage, type Keyring, packageSignatureMessage, type SignatureEntry, signMessage, trustedKey, verifySignature } from './trust.js';
 export * from './trust.js';
+import { applyChanges, ChangeError, type ChangeOperation, combineChanges, diffValues, escapeToken, type MergeConflict, targetOperations } from './changes.js';
+export * from './changes.js';
 type AjvLike = { addSchema(schema: object, id: string): void; getSchema(id: string): ValidateFunction | undefined };
 
 const layerOrder: ValidationLayer[] = ['parse', 'schema-selection', 'structural', 'consistency', 'references', 'semantic'];
@@ -142,7 +144,11 @@ function walk(value: unknown, source: string, pointer = '', entities: EntityLoca
     const object = value as Record<string, unknown>;
     if (typeof object.id === 'string') entities.push({ value: object, source, pointer });
     if (typeof object.$ref === 'string') refs.push({ value: object, source, pointer });
-    for (const [key, child] of Object.entries(object)) if (key !== '$ref') walk(child, source, `${pointer}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`, entities, refs);
+    for (const [key, child] of Object.entries(object)) {
+      // Overlay operations carry entities of another package as payload; they are not part of this one.
+      if (key === '$ref' || (key === 'operations' && object.type === 'overlay')) continue;
+      walk(child, source, `${pointer}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`, entities, refs);
+    }
   }
   return { entities, refs };
 }
@@ -320,7 +326,7 @@ export function versionSatisfies(version: string, range?: string): boolean {
 
 const pointerToken = (value: string) => value.replaceAll('~', '~0').replaceAll('/', '~1');
 
-type LoadedDependency = { name: string; version: string; index: Map<string, EntityLocation>; aliases: Record<string, string> };
+type LoadedDependency = { name: string; version: string; digest: string; root: string; index: Map<string, EntityLocation>; aliases: Record<string, string> };
 
 function entityIndex(documents: LoadedDocument[]): { entities: EntityLocation[]; index: Map<string, EntityLocation> } {
   const entities: EntityLocation[] = [];
@@ -361,7 +367,7 @@ async function loadDependencies(root: string, manifest: Record<string, unknown>,
     const { entities, index } = entityIndex(dependencyDocuments);
     const problems = (await integrityDiagnostics(directory, dependencyDocuments, entities, true)).filter((d) => d.severity === 'error');
     if (problems.length) push(base, 'OLS_DEPENDENCY_INTEGRITY', `Dependency ${name} failed verification: ${[...new Set(problems.map((d) => d.code))].sort().join(', ')}.`);
-    loaded.set(name, { name, version: String(dependencyManifest.version), index, aliases: stringRecord(dependencyManifest.aliases) });
+    loaded.set(name, { name, version: String(dependencyManifest.version), digest: actual, root: directory, index, aliases: stringRecord(dependencyManifest.aliases) });
   }
   const declaredNames = new Set(declared.map((item) => item.name));
   for (const name of Object.keys(locked).sort()) if (!declaredNames.has(name)) diagnostics.push({ layer: 'references', source: lockSource, jsonPointer: `/packages/${pointerToken(name)}`, code: 'OLS_LOCK_ENTRY_UNUSED', message: `Lock entry ${name} is not a declared dependency.`, severity: 'warning' });
@@ -497,6 +503,7 @@ export async function validatePackage(root: string, registry?: SchemaRegistry, o
       }
     }
   }
+  diagnostics.push(...await overlayDiagnostics(documents, dependencyPackages));
   diagnostics.push(...await integrityDiagnostics(root, documents, entities, false));
   diagnostics.push(...trustDiagnostics(root, documents, entities, options.keyring, false));
   const graph = new Map<string, string[]>();
@@ -758,6 +765,239 @@ export async function signApproval(path: string, privateKeyPem: string, options:
   approval.signatures = [...asSignatures(approval.signatures).filter((item) => item.key !== entry.key), entry];
   await writeFile(path, `${JSON.stringify(approval, null, 2)}\n`);
   return entry;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Change exchange: diff, overlays, merge, migrate
+// ---------------------------------------------------------------------------------------------
+
+/** Manifest members recomputed by `ols pack`; they are ignored when comparing packages. */
+const DERIVED_MANIFEST_KEYS = ['digest', 'files', 'signatures'];
+const MANIFEST_FILE = 'manifest.ols.json';
+const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Package documents keyed by package-relative path (POSIX separators), as parsed JSON. */
+export async function packageDocuments(root: string): Promise<Map<string, unknown>> {
+  const absoluteRoot = resolve(root);
+  const documents = new Map<string, unknown>();
+  for (const document of await loadPackage(absoluteRoot)) {
+    if (document.raw === null) throw new Error(`${document.source} is not valid JSON.`);
+    documents.set(normalizePath(relative(absoluteRoot, document.source)), document.raw);
+  }
+  return documents;
+}
+
+function comparable(path: string, document: unknown): unknown {
+  if (path !== MANIFEST_FILE || !document || typeof document !== 'object' || Array.isArray(document)) return document;
+  return Object.fromEntries(Object.entries(document).filter(([key]) => !DERIVED_MANIFEST_KEYS.includes(key)));
+}
+
+/**
+ * Entity-level change set that turns `base` into `other`. Changes are addressed to the innermost
+ * entity by ID; derived manifest members (`digest`, `files`, `signatures`) are ignored.
+ */
+export async function diffPackages(base: string, other: string): Promise<ChangeOperation[]> {
+  const before = await packageDocuments(base);
+  const after = await packageDocuments(other);
+  const operations: ChangeOperation[] = [];
+  for (const path of [...new Set([...before.keys(), ...after.keys()])].sort(byCodeUnit)) {
+    if (!after.has(path)) operations.push({ op: 'remove', document: path, path: '' });
+    else if (!before.has(path)) operations.push({ op: 'add', document: path, path: '', value: comparable(path, after.get(path)) });
+    else {
+      const a = comparable(path, before.get(path));
+      operations.push(...targetOperations(path, a, diffValues(a, comparable(path, after.get(path)))));
+    }
+  }
+  return operations;
+}
+
+/** An overlay document carrying `diffPackages(base, other)`, pinned to the base package's version and digest. */
+export async function createOverlay(base: string, other: string, id: string): Promise<Record<string, unknown>> {
+  const manifest = JSON.parse(await readFile(resolve(base, MANIFEST_FILE), 'utf8')) as Record<string, unknown>;
+  return {
+    $schema: 'https://ols.otyg.org/schema/v1.0/overlay.schema.json',
+    ols_version: typeof manifest.ols_version === 'string' ? manifest.ols_version : '1.1.0',
+    type: 'overlay',
+    id,
+    base: { package: String(manifest.package), version: String(manifest.version), digest: packageDigest(manifest) },
+    operations: await diffPackages(base, other),
+  };
+}
+
+async function writeDocuments(outDir: string, documents: Map<string, unknown>, previous: Iterable<string>): Promise<void> {
+  for (const path of previous) if (!documents.has(path)) await rm(resolve(outDir, path), { force: true });
+  for (const [path, document] of documents) {
+    const target = resolve(outDir, path);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, `${JSON.stringify(document, null, 2)}\n`);
+  }
+}
+
+async function assertEmptyOutput(outDir: string): Promise<void> {
+  try { if ((await readdir(outDir)).length) throw new Error(`Output directory ${outDir} is not empty.`); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+}
+
+/**
+ * Applies an overlay to its base package and writes the result to `outDir` (which must be empty or
+ * absent), then packs it. The base must match the overlay's pinned package, version, and digest.
+ */
+export async function applyOverlay(overlay: Record<string, unknown>, base: string, outDir: string): Promise<Record<string, unknown>> {
+  const manifest = JSON.parse(await readFile(resolve(base, MANIFEST_FILE), 'utf8')) as Record<string, unknown>;
+  const pinned = (overlay.base ?? {}) as Record<string, unknown>;
+  const digest = packageDigest(manifest);
+  if (pinned.package !== manifest.package || pinned.version !== manifest.version || pinned.digest !== digest) {
+    throw new Error(`The overlay was made for ${String(pinned.package)}@${String(pinned.version)} (${String(pinned.digest)}), but the base is ${String(manifest.package)}@${String(manifest.version)} (${digest}).`);
+  }
+  const documents = await packageDocuments(base);
+  const before = [...documents.keys()];
+  applyChanges(documents, (overlay.operations ?? []) as ChangeOperation[]);
+  await assertEmptyOutput(outDir);
+  await cp(resolve(base), resolve(outDir), { recursive: true });
+  await writeDocuments(resolve(outDir), documents, before);
+  return packPackage(outDir);
+}
+
+/** Every non-JSON file of a package (assets), keyed by package-relative path; `tests/` and dependencies are excluded. */
+async function packageAssets(root: string, directory = resolve(root), found = new Map<string, Buffer>()): Promise<Map<string, Buffer>> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) { if (entry.name !== 'tests' && entry.name !== DEFAULT_PACKAGES_DIRECTORY) await packageAssets(root, path, found); }
+    else if (entry.isFile() && !entry.name.endsWith('.json')) found.set(normalizePath(relative(resolve(root), path)), await readFile(path));
+  }
+  return found;
+}
+
+export type MergeResult = { merged: boolean; conflicts: MergeConflict[]; manifest?: Record<string, unknown> };
+
+/**
+ * Three-way merge of two packages derived from `base`. Both are diffed against the base at entity
+ * level; non-overlapping changes are combined, and assets merge file by file. With no conflicts
+ * the result is written to `outDir` (empty or absent) and packed; otherwise nothing is written.
+ */
+export async function mergePackages(base: string, ours: string, theirs: string, outDir: string): Promise<MergeResult> {
+  const { operations, conflicts } = combineChanges(await diffPackages(base, ours), await diffPackages(base, theirs));
+  const [baseAssets, ourAssets, theirAssets] = await Promise.all([packageAssets(base), packageAssets(ours), packageAssets(theirs)]);
+  const assets = new Map<string, Buffer | undefined>();
+  for (const path of [...new Set([...ourAssets.keys(), ...theirAssets.keys()])].sort(byCodeUnit)) {
+    const [original, mine, other] = [baseAssets.get(path), ourAssets.get(path), theirAssets.get(path)];
+    const same = (a?: Buffer, b?: Buffer) => (a === undefined ? b === undefined : b !== undefined && a.equals(b));
+    if (same(mine, other) || same(other, original)) assets.set(path, mine);
+    else if (same(mine, original)) assets.set(path, other);
+    else conflicts.push({ file: path });
+  }
+  if (conflicts.length) return { merged: false, conflicts };
+  const documents = await packageDocuments(base);
+  applyChanges(documents, operations);
+  await assertEmptyOutput(outDir);
+  await cp(resolve(ours), resolve(outDir), { recursive: true });
+  await writeDocuments(resolve(outDir), documents, (await packageDocuments(ours)).keys());
+  for (const [path, bytes] of assets) {
+    const target = resolve(outDir, path);
+    if (bytes === undefined) await rm(target, { force: true });
+    else { await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes); }
+  }
+  return { merged: true, conflicts: [], manifest: await packPackage(outDir) };
+}
+
+/** Overlays in a package must apply cleanly to the locked dependency they are pinned to. */
+async function overlayDiagnostics(documents: LoadedDocument[], dependencies: Map<string, LoadedDependency>): Promise<Diagnostic[]> {
+  const diagnostics: Diagnostic[] = [];
+  for (const document of documents) {
+    const overlay = document.data as Record<string, unknown> | undefined;
+    if (overlay?.type !== 'overlay') continue;
+    const base = (overlay.base ?? {}) as Record<string, unknown>;
+    const push = (jsonPointer: string, code: string, message: string) => diagnostics.push({ layer: 'semantic', source: document.source, entityId: String(overlay.id), jsonPointer, code, message, severity: 'error' });
+    const dependency = dependencies.get(String(base.package));
+    if (!dependency) { push('/base/package', 'OLS_OVERLAY_BASE_UNRESOLVED', `Overlay base ${String(base.package)} is not a locked dependency of this package.`); continue; }
+    if (base.version !== dependency.version) push('/base/version', 'OLS_OVERLAY_BASE_MISMATCH', `Overlay was made for ${dependency.name}@${String(base.version)}, but ${dependency.version} is locked.`);
+    if (base.digest !== dependency.digest) { push('/base/digest', 'OLS_OVERLAY_BASE_MISMATCH', `Overlay was made for package digest ${String(base.digest)}, but the locked dependency is ${dependency.digest}.`); continue; }
+    try { applyChanges(await packageDocuments(dependency.root), (overlay.operations ?? []) as ChangeOperation[]); }
+    catch (error) {
+      if (!(error instanceof ChangeError)) throw error;
+      push(error.index === undefined ? '/operations' : `/operations/${error.index}`, 'OLS_OVERLAY_CONFLICT', error.message);
+    }
+  }
+  return diagnostics;
+}
+
+export type MigrationChange = { source: string; pointer: string; rule: string };
+
+/** Corpus collections and the entity type of their members. */
+const CORPUS_COLLECTIONS: Record<string, string> = {
+  assets: 'asset', blocks: 'block', calendars: 'calendar', ordos: 'ordo', propers: 'proper', readings: 'reading',
+  roles: 'role', rubrics: 'rubric', sections: 'section', teachingNotes: 'teaching-note',
+};
+
+function migrateDocument(document: Record<string, unknown>, source: string, changes: MigrationChange[]): void {
+  const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+  const record = (pointer: string, rule: string) => changes.push({ source, pointer, rule });
+  const fixType = (value: Record<string, unknown>, expected: string, pointer: string) => {
+    if (typeof value.type !== 'string' || value.type === expected) return;
+    if (value.kind === undefined) value.kind = value.type;
+    value.type = expected;
+    record(pointer, 'type-kind');
+  };
+  const declared = typeof document.$schema === 'string' ? /\/([a-z-]+)\.schema\.json$/.exec(document.$schema)?.[1] : undefined;
+  if (declared) fixType(document, declared, '');
+  if (document.type === 'corpus') {
+    for (const [key, type] of Object.entries(CORPUS_COLLECTIONS)) {
+      const items = document[key];
+      if (Array.isArray(items)) items.forEach((item, i) => { if (isObject(item)) fixType(item, type, `/${key}/${i}`); });
+    }
+  }
+  const visit = (value: unknown, pointer: string) => {
+    if (Array.isArray(value)) { value.forEach((item, i) => visit(item, `${pointer}/${i}`)); return; }
+    if (!isObject(value)) return;
+    if (document.type !== 'manifest' && isObject(value.authority) && value.authority.type === undefined) {
+      value.authority.type = 'authority';
+      record(`${pointer}/authority`, 'authority-type');
+    }
+    if ((value.type === 'role' || value.type === 'role-group') && value.labels !== undefined && value.label === undefined) {
+      value.label = value.labels; delete value.labels;
+      record(pointer, 'label-singular');
+    }
+    if (value.type === 'role-group' && value.members !== undefined && value.roles === undefined) {
+      value.roles = value.members; delete value.members;
+      record(pointer, 'role-group-roles');
+    }
+    for (const [key, child] of Object.entries(value)) visit(child, `${pointer}/${escapeToken(key)}`);
+  };
+  visit(document, '');
+  const entities: EntityLocation[] = [];
+  walk(document, source, '', entities, []);
+  const refObject = (item: unknown): string | undefined => (isObject(item) && Object.keys(item).length === 1 && typeof item.$ref === 'string' ? item.$ref : undefined);
+  for (const entity of entities) {
+    for (const field of idReferenceFields[entityType(entity)] ?? []) {
+      const value = entity.value[field];
+      if (Array.isArray(value)) value.forEach((item, i) => {
+        const id = refObject(item);
+        if (id !== undefined) { value[i] = id; record(`${entity.pointer}/${field}/${i}`, 'id-list-ref-object'); }
+      });
+      else if (refObject(value) !== undefined) { entity.value[field] = refObject(value); record(`${entity.pointer}/${field}`, 'id-list-ref-object'); }
+    }
+  }
+}
+
+/**
+ * Rewrites documents written against pre-1.1 conventions: subtype in `type` (moved to `kind`),
+ * untyped `authority` objects, role `labels`, role-group `members`, and `{ "$ref" }` objects in ID
+ * lists. Accepts a package directory or a single document. Writes changed documents unless `write` is false.
+ */
+export async function migratePackage(path: string, options: { write?: boolean } = {}): Promise<MigrationChange[]> {
+  const target = resolve(path);
+  const isDirectory = (await stat(target)).isDirectory();
+  const files = isDirectory ? [...(await packageDocuments(target)).keys()].map((file) => resolve(target, file)) : [target];
+  const changes: MigrationChange[] = [];
+  for (const file of files) {
+    const document = JSON.parse(await readFile(file, 'utf8')) as unknown;
+    if (!document || typeof document !== 'object' || Array.isArray(document)) continue;
+    const source = isDirectory ? normalizePath(relative(target, file)) : normalizePath(file).split('/').at(-1)!;
+    const count = changes.length;
+    migrateDocument(document as Record<string, unknown>, source, changes);
+    if (changes.length > count && options.write !== false) await writeFile(file, `${JSON.stringify(document, null, 2)}\n`);
+  }
+  return changes.sort((a, b) => byCodeUnit(a.source, b.source) || byCodeUnit(a.pointer, b.pointer) || byCodeUnit(a.rule, b.rule));
 }
 
 export async function runSelfTests(root: string): Promise<ValidationReport> {

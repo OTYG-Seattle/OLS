@@ -13,7 +13,10 @@ export type ChangeOperation = {
   value?: unknown;
 };
 
-export class ChangeError extends Error {}
+export class ChangeError extends Error {
+  /** Index of the failing operation within the change set, when known. */
+  index?: number;
+}
 
 type Json = unknown;
 type JsonObject = Record<string, unknown>;
@@ -78,7 +81,10 @@ export function entityPointers(document: Json): Map<string, string> {
     if (Array.isArray(value)) value.forEach((item, i) => visit(item, `${pointer}/${i}`));
     else if (isObject(value)) {
       if (typeof value.id === 'string' && !found.has(value.id)) found.set(value.id, pointer);
-      for (const [key, item] of Object.entries(value)) if (key !== '$ref') visit(item, `${pointer}/${escapeToken(key)}`);
+      for (const [key, item] of Object.entries(value)) {
+        if (key === '$ref' || (key === 'operations' && value.type === 'overlay')) continue;
+        visit(item, `${pointer}/${escapeToken(key)}`);
+      }
     }
   };
   visit(document, '');
@@ -175,7 +181,11 @@ export function applyChanges(documents: Map<string, Json>, operations: ChangeOpe
         throw new ChangeError('An operation must target an entity or a document.');
       }
     } catch (error) {
-      if (error instanceof ChangeError) throw new ChangeError(`Operation ${i} (${change.op} ${change.entity ?? change.document}${change.path}): ${error.message}`);
+      if (error instanceof ChangeError) {
+        const wrapped = new ChangeError(`Operation ${i} (${change.op} ${change.entity ?? change.document}${change.path}): ${error.message}`);
+        wrapped.index = i;
+        throw wrapped;
+      }
       throw error;
     }
   });
@@ -190,7 +200,7 @@ const arrayParent = (change: ChangeOperation) => {
   return last !== undefined && /^(-|0|[1-9][0-9]*)$/.test(last) ? change.path.slice(0, change.path.lastIndexOf('/')) : undefined;
 };
 
-export type MergeConflict = { ours: ChangeOperation; theirs: ChangeOperation };
+export type MergeConflict = { ours?: ChangeOperation; theirs?: ChangeOperation; file?: string };
 
 /**
  * Combines two change sets made against the same base. Identical operations are kept once.

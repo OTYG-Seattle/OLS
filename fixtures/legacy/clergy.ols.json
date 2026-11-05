@@ -1,0 +1,8 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/role-group.schema.json",
+  "ols_version": "1.0.0",
+  "type": "role-group",
+  "id": "role-group-clergy",
+  "labels": { "en": "Clergy" },
+  "members": ["role-priest", "role-deacon"]
+}

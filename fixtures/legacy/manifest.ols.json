@@ -1,0 +1,10 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/manifest.schema.json",
+  "ols_version": "1.0.0",
+  "type": "manifest",
+  "package": "org.openliturgy.legacy-demo",
+  "version": "1.0.0",
+  "title": { "en": "Package written in pre-1.1 style" },
+  "license": "Apache-2.0",
+  "files": ["corpus.ols.json", "clergy.ols.json"]
+}

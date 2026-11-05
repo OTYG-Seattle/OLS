@@ -1,0 +1,23 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/corpus.schema.json",
+  "ols_version": "1.0.0",
+  "type": "corpus",
+  "id": "legacy-demo",
+  "authority": { "status": "educational-only", "allowedUse": ["education"] },
+  "roles": [
+    { "id": "role-deacon", "type": "deacon", "labels": { "en": "Deacon" } },
+    { "id": "role-priest", "type": "celebrant", "labels": { "en": "Priest" } }
+  ],
+  "readings": [
+    { "id": "reading-john-1-1-5", "type": "gospel", "role": "role-deacon", "reference": { "system": "osis", "osisRef": "John.1.1-John.1.5" } }
+  ],
+  "blocks": [
+    { "id": "block-gospel", "type": "reading-block", "elements": [{ "$ref": "reading-john-1-1-5" }] }
+  ],
+  "sections": [
+    { "id": "sec-word", "type": "section", "label": { "en": "Word" }, "blocks": [{ "$ref": "block-gospel" }] }
+  ],
+  "ordos": [
+    { "id": "ordo-demo", "type": "eucharist", "label": { "en": "Demo" }, "sections": [{ "$ref": "sec-word" }] }
+  ]
+}
