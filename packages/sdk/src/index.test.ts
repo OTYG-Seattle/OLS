@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import jsonld from 'jsonld';
 import { loadContext } from '@openliturgy/schemas';
-import { canonicalDigest, canonicalize, lockPackage, packPackage, versionSatisfies, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
+import { approvalSignatureMessage, canonicalDigest, canonicalize, generateSigningKey, lockPackage, signApproval, signPackage, verifySignature, packPackage, versionSatisfies, resolveReference, SchemaRegistry, verifyPackage, validateDocument, validatePackage, validateTranslationVariants } from './index.js';
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), '../../../fixtures');
 
@@ -331,5 +331,68 @@ describe('JSON-LD context', () => {
     const [label] = section['http://www.w3.org/2000/01/rdf-schema#label'] as Array<{ '@value': string; '@language': string }>;
     expect([label!['@value'], label!['@language'].toLowerCase()]).toEqual(['Word', 'en-us']);
     expect(section[`${vocab}blocks`]).toContainEqual({ '@id': 'org.openliturgy.dep:block-kyrie' });
+  });
+});
+
+describe('signatures and approvals', () => {
+  const keyring = async () => JSON.parse(await readFile(join(fixtures, 'keys/demo-keyring.json'), 'utf8'));
+  const codes = (report: { diagnostics: Array<{ code: string }> }) => report.diagnostics.map((d) => d.code).sort();
+  const copy = async (name: string) => {
+    const directory = await mkdtemp(join(tmpdir(), 'ols-trust-'));
+    await cp(join(fixtures, name), directory, { recursive: true });
+    return directory;
+  };
+
+  it('verifies the signed fixture against the keyring', async () => {
+    expect((await verifyPackage(join(fixtures, 'signed'), { keyring: await keyring() })).valid).toBe(true);
+    expect(codes(await validatePackage(join(fixtures, 'signed'), undefined, { keyring: await keyring() }))).toEqual(['OLS_SCHEMA_PROVISIONAL']);
+  });
+
+  it('rejects changed content even after re-packing', async () => {
+    expect(codes(await verifyPackage(join(fixtures, 'signed-tampered'), { keyring: await keyring() }))).toEqual([
+      'OLS_APPROVAL_STALE', 'OLS_AUTHORITY_UNATTESTED', 'OLS_PACKAGE_UNSIGNED', 'OLS_SIGNATURE_INVALID',
+    ]);
+  });
+
+  it('does not trust keys outside the keyring or beyond their allowed statuses', async () => {
+    const other = { keys: [{ key: generateSigningKey().publicKey }] };
+    expect(codes(await verifyPackage(join(fixtures, 'signed'), { keyring: other }))).toEqual([
+      'OLS_APPROVAL_UNTRUSTED', 'OLS_AUTHORITY_UNATTESTED', 'OLS_PACKAGE_UNSIGNED', 'OLS_SIGNATURE_UNTRUSTED', 'OLS_SIGNATURE_UNTRUSTED',
+    ]);
+    const limited = await keyring();
+    limited.keys[0].approves = ['parish-reviewed'];
+    const report = await verifyPackage(join(fixtures, 'signed'), { keyring: limited });
+    expect(codes(report)).toEqual(['OLS_APPROVAL_UNTRUSTED', 'OLS_AUTHORITY_UNATTESTED', 'OLS_SIGNATURE_UNTRUSTED']);
+  });
+
+  it('signs a package and an approval end to end', async () => {
+    const directory = await copy('signed');
+    const { privateKeyPem, publicKey } = generateSigningKey();
+    const approvalPath = join(directory, 'approvals/diocesan-review.ols.json');
+    await signApproval(approvalPath, privateKeyPem);
+    await packPackage(directory);
+    await signPackage(directory, privateKeyPem);
+    const report = await verifyPackage(directory, { keyring: { keys: [{ key: publicKey }] } });
+    expect(report.valid).toBe(true);
+  });
+
+  it('drops package signatures when packing changes the digest, and keeps them otherwise', async () => {
+    const directory = await copy('signed');
+    expect((await packPackage(directory)).signatures).toHaveLength(1);
+    const corpus = join(directory, 'corpus.ols.json');
+    await writeFile(corpus, (await readFile(corpus, 'utf8')).replace('Lord, have mercy.', 'Lord, have mercy!'));
+    expect((await packPackage(directory)).signatures).toBeUndefined();
+  });
+
+  it('refuses to sign an unpacked package', async () => {
+    const directory = await copy('complete-minimal');
+    await expect(signPackage(directory, generateSigningKey().privateKeyPem)).rejects.toThrow(/ols pack/);
+  });
+
+  it('separates package and approval signature domains', async () => {
+    const manifest = JSON.parse(await readFile(join(fixtures, 'signed/manifest.ols.json'), 'utf8'));
+    const approval = JSON.parse(await readFile(join(fixtures, 'signed/approvals/diocesan-review.ols.json'), 'utf8'));
+    expect(verifySignature(approvalSignatureMessage(approval), manifest.signatures[0])).toBe(false);
+    expect(verifySignature(approvalSignatureMessage(approval), approval.signatures[0])).toBe(true);
   });
 });

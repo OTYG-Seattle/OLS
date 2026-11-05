@@ -8,6 +8,8 @@ import type { Diagnostic, JsonValue, LoadedDocument, OlsDocument, ValidationLaye
 export type { Diagnostic, LoadedDocument, OlsDocument, ValidationReport } from '@openliturgy/types';
 import { bytesDigest, canonicalDigest, isPackageRelativeUri, manifestFileEntries, packageDigest } from './integrity.js';
 export * from './integrity.js';
+import { ATTESTED_STATUSES, approvalSignatureMessage, type Keyring, packageSignatureMessage, type SignatureEntry, signMessage, trustedKey, verifySignature } from './trust.js';
+export * from './trust.js';
 type AjvLike = { addSchema(schema: object, id: string): void; getSchema(id: string): ValidateFunction | undefined };
 
 const layerOrder: ValidationLayer[] = ['parse', 'schema-selection', 'structural', 'consistency', 'references', 'semantic'];
@@ -290,7 +292,11 @@ export const DEFAULT_PACKAGES_DIRECTORY = 'ols_packages';
 export type LockEntry = { version: string; digest: string; resolved: string };
 /** Returns the directory of a locked dependency, or undefined when it cannot be found. */
 export type DependencyResolver = (name: string, entry: LockEntry, root: string) => Promise<string | undefined> | string | undefined;
-export type PackageValidationOptions = { resolver?: DependencyResolver };
+export type PackageValidationOptions = {
+  resolver?: DependencyResolver;
+  /** Trusted signing keys. Without a keyring, signatures are checked for validity but not for trust. */
+  keyring?: Keyring;
+};
 
 /** Resolves `lock.packages[name].resolved` as a directory relative to the package root. */
 export const filesystemResolver: DependencyResolver = async (_name, entry, root) => {
@@ -492,6 +498,7 @@ export async function validatePackage(root: string, registry?: SchemaRegistry, o
     }
   }
   diagnostics.push(...await integrityDiagnostics(root, documents, entities, false));
+  diagnostics.push(...trustDiagnostics(root, documents, entities, options.keyring, false));
   const graph = new Map<string, string[]>();
   for (const entity of entities) {
     const nested = [...walk(entity.value, entity.source).refs.map((item) => String(item.value.$ref)), ...referenceSites([entity], []).map((site) => site.value)].map((value) => resolveReference(value, index, absoluteRoot, entity.source, packageName)).filter((item): item is EntityLocation => item !== undefined).map((item) => String(item.value.id));
@@ -579,12 +586,80 @@ async function integrityDiagnostics(root: string, documents: LoadedDocument[], e
   return diagnostics;
 }
 
+const asSignatures = (value: unknown): SignatureEntry[] => (Array.isArray(value) ? value as SignatureEntry[] : []);
+
+/**
+ * Signature and approval checks shared by `validatePackage` and `verifyPackage` (strict: with a
+ * keyring, the package must carry a trusted signature and every approval must be attested).
+ */
+function trustDiagnostics(root: string, documents: LoadedDocument[], entities: EntityLocation[], keyring: Keyring | undefined, strict: boolean): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const absoluteRoot = resolve(root);
+  const manifestSource = normalizePath(resolve(absoluteRoot, 'manifest.ols.json'));
+  const manifest = documents.find((d) => d.source === manifestSource)?.data as Record<string, unknown> | undefined;
+  if (manifest) {
+    const message = packageSignatureMessage(packageDigest(manifest));
+    let trusted = false;
+    asSignatures(manifest.signatures).forEach((entry, i) => {
+      if (!verifySignature(message, entry)) {
+        diagnostics.push({ layer: 'semantic', source: manifestSource, jsonPointer: `/signatures/${i}`, code: 'OLS_SIGNATURE_INVALID', message: 'Package signature does not match the package content or key.', severity: 'error' });
+      } else if (keyring && !trustedKey(keyring, entry.key)) {
+        diagnostics.push({ layer: 'semantic', source: manifestSource, jsonPointer: `/signatures/${i}`, code: 'OLS_SIGNATURE_UNTRUSTED', message: `Package is signed by ${entry.key}, which is not in the keyring.`, severity: 'info' });
+      } else if (keyring) trusted = true;
+    });
+    if (strict && keyring && !trusted) diagnostics.push({ layer: 'semantic', source: manifestSource, jsonPointer: '', code: 'OLS_PACKAGE_UNSIGNED', message: 'The package has no valid signature from a trusted key.', severity: 'error' });
+  }
+  const index = new Map<string, EntityLocation>();
+  for (const entity of entities) if (!index.has(String(entity.value.id))) index.set(String(entity.value.id), entity);
+  // Entities covered by an approval in effect, per status.
+  const covered: Array<{ status: string; entity: EntityLocation }> = [];
+  for (const document of documents) {
+    const approval = document.data as Record<string, unknown> | undefined;
+    if (approval?.type !== 'approval') continue;
+    const status = String(approval.status);
+    let attested = !keyring;
+    const message = approvalSignatureMessage(approval);
+    asSignatures(approval.signatures).forEach((entry, i) => {
+      if (!verifySignature(message, entry)) {
+        diagnostics.push({ layer: 'semantic', source: document.source, entityId: String(approval.id), jsonPointer: `/signatures/${i}`, code: 'OLS_SIGNATURE_INVALID', message: 'Approval signature does not match the approval or key.', severity: 'error' });
+        return;
+      }
+      if (!keyring) return;
+      const key = trustedKey(keyring, entry.key);
+      if (key && (!key.approves || key.approves.includes(status))) attested = true;
+      else diagnostics.push({ layer: 'semantic', source: document.source, entityId: String(approval.id), jsonPointer: `/signatures/${i}`, code: 'OLS_SIGNATURE_UNTRUSTED', message: key ? `Key ${entry.key} is trusted, but not to attest ${status}.` : `Approval is signed by ${entry.key}, which is not in the keyring.`, severity: 'info' });
+    });
+    if (!attested) diagnostics.push({ layer: 'semantic', source: document.source, entityId: String(approval.id), jsonPointer: '', code: 'OLS_APPROVAL_UNTRUSTED', message: `Approval ${String(approval.id)} has no valid signature from a key trusted to attest ${status}.`, severity: strict ? 'error' : 'warning' });
+    (Array.isArray(approval.subjects) ? approval.subjects as Array<Record<string, unknown>> : []).forEach((subject, i) => {
+      const entity = index.get(String(subject.entity));
+      if (!entity) {
+        diagnostics.push({ layer: 'semantic', source: document.source, entityId: String(approval.id), jsonPointer: `/subjects/${i}/entity`, code: 'OLS_APPROVAL_SUBJECT_UNRESOLVED', message: `Approved entity ${String(subject.entity)} is not in the package.`, severity: 'error' });
+        return;
+      }
+      const actual = canonicalDigest(entity.value);
+      if (actual !== subject.digest) {
+        diagnostics.push({ layer: 'semantic', source: document.source, entityId: String(approval.id), jsonPointer: `/subjects/${i}/digest`, code: 'OLS_APPROVAL_STALE', message: `${String(subject.entity)} changed after it was approved (now ${actual}); the approval no longer applies to it.`, severity: 'error' });
+        return;
+      }
+      if (attested) covered.push({ status, entity });
+    });
+  }
+  for (const entity of entities) {
+    const status = (entity.value.authority as Record<string, unknown> | undefined)?.status;
+    if (typeof status !== 'string' || !(ATTESTED_STATUSES as readonly string[]).includes(status)) continue;
+    const isCovered = covered.some((item) => item.status === status && item.entity.source === entity.source && (entity.pointer === item.entity.pointer || entity.pointer.startsWith(`${item.entity.pointer}/`)));
+    if (!isCovered) diagnostics.push({ layer: 'semantic', source: entity.source, entityId: String(entity.value.id), jsonPointer: `${entity.pointer}/authority/status`, code: 'OLS_AUTHORITY_UNATTESTED', message: `${String(entity.value.id)} claims ${status}, but no approval in effect covers its current content.`, severity: 'warning' });
+  }
+  return diagnostics;
+}
+
 /** Integrity-only verification: every document, package-local asset, and the package itself must be pinned and match. */
-export async function verifyPackage(root: string): Promise<ValidationReport> {
+export async function verifyPackage(root: string, options: { keyring?: Keyring } = {}): Promise<ValidationReport> {
   const documents = await loadPackage(root);
   const entities: EntityLocation[] = [];
   for (const document of documents) if (document.data) walk(document.data, document.source, '', entities, []);
   const diagnostics = await integrityDiagnostics(root, documents, entities, true);
+  diagnostics.push(...trustDiagnostics(root, documents, entities, options.keyring, true));
   if (!documents.some((d) => d.data?.type === 'manifest')) diagnostics.push({ layer: 'consistency', source: normalizePath(resolve(root, 'manifest.ols.json')), jsonPointer: '', code: 'OLS_MANIFEST_MISSING', message: 'Package is missing manifest.ols.json.', severity: 'error' });
   return report(diagnostics, documents.map((item) => item.source), []);
 }
@@ -612,8 +687,11 @@ export async function packPackage(root: string, options: { write?: boolean } = {
     })
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   manifest.files = files;
+  const previousDigest = manifest.digest;
   delete manifest.digest;
   manifest.digest = packageDigest(manifest);
+  // Signatures cover the previous digest; once the content changes they can only be invalid.
+  if (previousDigest !== manifest.digest) delete manifest.signatures;
   if (options.write !== false) await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 }
@@ -658,6 +736,28 @@ export async function lockPackage(root: string, options: { packagesDirectory?: s
     if (manifestUpdated) await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   }
   return { lock, manifestUpdated };
+}
+
+/** Signs a packed package: adds (or replaces) this key's signature over the package digest in `manifest.signatures`. */
+export async function signPackage(root: string, privateKeyPem: string, options: { signer?: string } = {}): Promise<SignatureEntry> {
+  const manifestPath = resolve(root, 'manifest.ols.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+  const verification = await verifyPackage(root);
+  if (typeof manifest.digest !== 'string' || !verification.valid) throw new Error(`Run \`ols pack\` before signing; the package does not verify (${[...new Set(verification.diagnostics.map((d) => d.code))].join(', ')}).`);
+  const entry: SignatureEntry = { ...signMessage(packageSignatureMessage(manifest.digest), privateKeyPem), ...(options.signer ? { signer: options.signer } : {}) };
+  manifest.signatures = [...asSignatures(manifest.signatures).filter((item) => item.key !== entry.key), entry];
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return entry;
+}
+
+/** Signs an approval document in place, adding (or replacing) this key's signature. Re-run `ols pack` afterwards. */
+export async function signApproval(path: string, privateKeyPem: string, options: { signer?: string } = {}): Promise<SignatureEntry> {
+  const approval = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  if (approval.type !== 'approval') throw new Error(`${path} is not an approval document.`);
+  const entry: SignatureEntry = { ...signMessage(approvalSignatureMessage(approval), privateKeyPem), ...(options.signer ? { signer: options.signer } : {}) };
+  approval.signatures = [...asSignatures(approval.signatures).filter((item) => item.key !== entry.key), entry];
+  await writeFile(path, `${JSON.stringify(approval, null, 2)}\n`);
+  return entry;
 }
 
 export async function runSelfTests(root: string): Promise<ValidationReport> {

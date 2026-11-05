@@ -119,6 +119,13 @@
       "additionalProperties": {
         "$ref": "#/$defs/Id"
       }
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Signature"
+      },
+      "description": "Signatures over the package digest. Not covered by the package digest."
     }
   },
   "required": [
@@ -431,6 +438,31 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
       "description": "sha256 digest: of canonical JSON (RFC 8785 + NFC) for OLS documents, of raw bytes for assets."
+    },
+    "Signature": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^ed25519:[A-Za-z0-9_-]{43}$",
+          "description": "Ed25519 public key: ed25519: + base64url of the 32 raw bytes."
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "base64url Ed25519 signature (64 bytes)."
+        },
+        "signer": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Optional person or organization ID of the signer (not covered by the signature)."
+        }
+      },
+      "required": [
+        "key",
+        "signature"
+      ],
+      "additionalProperties": false
     }
   },
   "x-ols-schema-source": "synthesized",

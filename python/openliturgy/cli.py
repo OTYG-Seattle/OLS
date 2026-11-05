@@ -6,11 +6,14 @@ import sys
 from pathlib import Path
 
 from .schemas import SchemaRegistry
+from .trust import generate_signing_key
 from .validation import (
     LAYERS,
     lock_package,
     pack_package,
     run_self_tests,
+    sign_approval,
+    sign_package,
     validate_document,
     validate_package,
     verify_package,
@@ -25,9 +28,17 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("--layer", choices=LAYERS)
     validate.add_argument("--format", choices=("text", "json"), default="text")
     validate.add_argument("--self-test", action="store_true")
+    validate.add_argument("--keyring")
     verify = commands.add_parser("verify")
     verify.add_argument("path")
     verify.add_argument("--format", choices=("text", "json"), default="text")
+    verify.add_argument("--keyring")
+    keygen = commands.add_parser("keygen")
+    keygen.add_argument("--out", required=True)
+    sign = commands.add_parser("sign")
+    sign.add_argument("path")
+    sign.add_argument("--key", required=True)
+    sign.add_argument("--signer")
     pack = commands.add_parser("pack")
     pack.add_argument("path")
     pack.add_argument("--stdout", action="store_true")
@@ -44,7 +55,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "schemas":
             SchemaRegistry.bundled().refresh(args.cache)
             return 0
+        if args.command == "keygen":
+            private_key_pem, public_key = generate_signing_key()
+            out = Path(args.out)
+            with open(out, "x", encoding="ascii") as handle:
+                handle.write(private_key_pem)
+            out.chmod(0o600)
+            print(public_key)
+            return 0
         path = Path(args.path).resolve()
+        keyring = (
+            json.loads(Path(args.keyring).read_text(encoding="utf-8")) if getattr(args, "keyring", None) else None
+        )
+        if args.command == "sign":
+            private_key_pem = Path(args.key).read_text(encoding="ascii")
+            entry = (
+                sign_package(path, private_key_pem, args.signer)
+                if path.is_dir()
+                else sign_approval(path, private_key_pem, args.signer)
+            )
+            print(f"Signed with {entry['key']}")
+            return 0
         if args.command == "lock":
             lockfile, manifest_updated = lock_package(path, args.packages_dir, write=not args.stdout)
             if args.stdout:
@@ -58,12 +89,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(manifest, indent=2, ensure_ascii=False) if args.stdout else manifest["digest"])
             return 0
         if args.command == "verify":
-            result = verify_package(path)
+            result = verify_package(path, keyring)
         else:
             result = (
                 run_self_tests(path)
                 if args.self_test
-                else (validate_package(path) if path.is_dir() else validate_document(path))
+                else (validate_package(path, keyring=keyring) if path.is_dir() else validate_document(path))
             )
         if getattr(args, "layer", None):
             last = LAYERS.index(args.layer)

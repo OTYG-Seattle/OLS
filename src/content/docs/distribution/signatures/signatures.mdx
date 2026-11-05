@@ -1,0 +1,109 @@
+---
+title: 'Signatures & Approvals'
+description: 'Ed25519 package signatures, approvals bound to content digests, and consumer keyrings.'
+category: 'distribution'
+order: 44
+updatedAt: 2026-11-05
+---
+
+A digest proves that content is unchanged. A signature proves who published it. An approval proves that a specific body reviewed specific text. OLS keeps all three separate, so that changing a single word of an approved prayer visibly withdraws the approval from that prayer and nothing else.
+
+## Package Signatures
+
+After `ols pack`, a publisher signs the package digest with an Ed25519 key:
+
+```bash
+ols keygen --out publisher.pem   # prints the public key, e.g. ed25519:JJ_a3SxM…
+ols pack ./package
+ols sign ./package --key publisher.pem --signer org-demo-diocese
+```
+
+The signature is stored in `manifest.signatures`. That member is excluded from the package digest, so signing does not change it, and several parties can each sign:
+
+```json
+{
+  "signatures": [
+    {
+      "key": "ed25519:JJ_a3SxMi_btlclVusnTQj_FUo7WKXcIPPC8LCB3mO0",
+      "signature": "…86 base64url characters…",
+      "signer": "org-demo-diocese"
+    }
+  ]
+}
+```
+
+| Member      | Meaning                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| `key`       | `ed25519:` followed by the base64url (unpadded) 32-byte public key.                         |
+| `signature` | base64url Ed25519 signature of `OLS-PACKAGE-SIGNATURE-v1\n` followed by the package digest. |
+| `signer`    | Optional ID of the signing person or organization. It is informational and not signed.      |
+
+`ols pack` removes package signatures whenever the package digest changes, because they signed different content. Re-sign after re-packing.
+
+## Approvals
+
+An `approval` document records that an issuer reviewed or approved specific entities **as they are now**. Each subject is bound to the canonical digest of that entity, and approving an entity also covers everything nested inside it.
+
+```json
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/approval.schema.json",
+  "ols_version": "1.1.0",
+  "type": "approval",
+  "id": "approval-demo-diocese-kyrie",
+  "status": "diocesan-approved",
+  "issuer": "org-demo-diocese",
+  "issued": "2026-11-01",
+  "allowedUse": ["education", "altar-use"],
+  "subjects": [
+    { "entity": "block-kyrie", "digest": "sha256:ea6596ad7803a4f1cd42a4d5931d3366b437dacf72dcc6f5de34b4b4b533784c" }
+  ]
+}
+```
+
+The issuing body signs the approval (`ols sign approvals/diocesan-review.ols.json --key diocese.pem`). The signature covers `OLS-APPROVAL-SIGNATURE-v1\n` followed by the digest of the approval without its `signatures`. The different prefixes mean a package signature can never be presented as an approval signature, or the reverse. Approvals are ordinary package documents, so `ols pack` pins them. Sign approvals first, then pack, then sign the package.
+
+An entity whose `authority.status` is `parish-reviewed`, `diocesan-approved`, or `synodal-approved` should be covered by an approval in effect with that status. Otherwise validation warns with `OLS_AUTHORITY_UNATTESTED`: the status is only a claim.
+
+## Keyrings: Deciding Whom to Trust
+
+The SDKs always check that signatures are mathematically valid. Whether a valid signature _matters_ is the consumer's decision, expressed as a keyring kept outside the package:
+
+```json
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/keyring.schema.json",
+  "ols_version": "1.1.0",
+  "type": "keyring",
+  "keys": [
+    {
+      "key": "ed25519:JJ_a3SxMi_btlclVusnTQj_FUo7WKXcIPPC8LCB3mO0",
+      "name": "Demo diocese (test fixture only)",
+      "approves": ["diocesan-approved"]
+    }
+  ]
+}
+```
+
+`approves` limits which approval statuses the key may attest. A parish key cannot attest a synodal approval. Omit it to trust a key for any status.
+
+```bash
+ols verify ./package --keyring keyring.json    # requires a trusted package signature and attested approvals
+ols validate ./package --keyring keyring.json  # reports trust problems as warnings
+```
+
+## Diagnostics
+
+| Code                              | Severity                   | Meaning                                                                        |
+| --------------------------------- | -------------------------- | ------------------------------------------------------------------------------ |
+| `OLS_SIGNATURE_INVALID`           | error                      | A signature does not match the content or the key.                             |
+| `OLS_SIGNATURE_UNTRUSTED`         | info                       | A valid signature by a key the keyring does not trust (for this status).       |
+| `OLS_PACKAGE_UNSIGNED`            | error (`verify --keyring`) | No valid package signature from a trusted key.                                 |
+| `OLS_APPROVAL_UNTRUSTED`          | warning; error in `verify` | With a keyring, the approval has no valid signature from an authorized key.    |
+| `OLS_APPROVAL_STALE`              | error                      | An approved entity changed after approval; the approval no longer covers it.   |
+| `OLS_APPROVAL_SUBJECT_UNRESOLVED` | error                      | An approval names an entity that is not in the package.                        |
+| `OLS_AUTHORITY_UNATTESTED`        | warning                    | An entity claims a reviewed/approved status that no approval in effect covers. |
+
+<Callout tone="warning" title="Protect signing keys">
+  Keep private keys out of packages and repositories. A leaked key lets anyone publish content that appears approved;
+  consumers should remove it from their keyrings. The keys in this repository's fixtures are public test keys only;
+  their private halves were never committed.
+</Callout>

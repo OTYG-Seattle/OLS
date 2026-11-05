@@ -47,6 +47,10 @@ OLS does not make software the authority over the liturgy. It records who review
 | `historical-only`   | Preserved for history; not current practice.                |
 | `deprecated`        | Should not be used in new materials.                        |
 
+## Attesting a Status
+
+`authority.status` on its own is a claim made by whoever edited the file. To make `parish-reviewed`, `diocesan-approved`, or `synodal-approved` verifiable, the reviewing body issues an `approval` document. It binds the status to the exact content digests it reviewed, and the body signs it with its key. If the text changes, the approval stops covering it. See [Signatures & Approvals](/advanced-profiles/distribution/signatures).
+
 ## Evaluate Use, Not Just Status
 
 `status` summarizes review maturity. `allowedUse` and `restrictedUse` answer the separate question of what a consumer may do with the content. Applications should evaluate all three controls:

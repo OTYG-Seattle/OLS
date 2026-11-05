@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ols.otyg.org/schema/v1.0/approval.schema.json",
+  "title": "OLS Approval",
+  "description": "An ecclesial review or approval of specific entities, bound to their content digests and optionally signed by the approving body.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "const": "https://ols.otyg.org/schema/v1.0/approval.schema.json"
+    },
+    "ols_version": {
+      "type": "string",
+      "pattern": "^1\\.[01]\\.[0-9]+$"
+    },
+    "type": {
+      "const": "approval"
+    },
+    "id": {
+      "$ref": "#/$defs/Id"
+    },
+    "status": {
+      "$ref": "#/$defs/AuthorityStatus"
+    },
+    "issuer": {
+      "$ref": "#/$defs/Id",
+      "description": "Organization (or person) ID of the approving body."
+    },
+    "issued": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "allowedUse": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "restrictedUse": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "$ref": "#/$defs/LocalizedText"
+    },
+    "subjects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "entity": {
+            "$ref": "#/$defs/Id"
+          },
+          "digest": {
+            "$ref": "#/$defs/Digest"
+          }
+        },
+        "required": [
+          "entity",
+          "digest"
+        ],
+        "additionalProperties": false
+      },
+      "description": "The approved entities and the canonical digest of each as approved. Approving an entity covers everything nested inside it."
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Signature"
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "ols_version",
+    "type",
+    "id",
+    "status",
+    "issuer",
+    "subjects"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "AuthorityStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "needs-review",
+        "educational-only",
+        "parish-reviewed",
+        "diocesan-approved",
+        "synodal-approved",
+        "historical-only",
+        "deprecated"
+      ],
+      "description": "Ecclesial review and permitted-use status."
+    },
+    "LocalizedText": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^(?:[a-z]{2,3}(?:-[a-z]{3}){0,3}|[a-z]{4,8})(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?(?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*(?:-x(?:-[a-z0-9]{1,8})+)?$": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Signature": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^ed25519:[A-Za-z0-9_-]{43}$",
+          "description": "Ed25519 public key: ed25519: + base64url of the 32 raw bytes."
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "base64url Ed25519 signature (64 bytes)."
+        },
+        "signer": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Optional person or organization ID of the signer (not covered by the signature)."
+        }
+      },
+      "required": [
+        "key",
+        "signature"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "x-ols-schema-source": "normative",
+  "x-ols-specification": "https://ols.otyg.org/schema/v1.0/approval.schema.json",
+  "x-ols-revision": "1.2.0"
+}

@@ -21,6 +21,11 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - `iiif` on assets (`manifest`, `canvas`, `region`) for manuscript images served by IIIF.
 - `catalog` document type (`catalog.schema.json`) for a publisher's `/.well-known/openliturgy.json`, listing every package version with its digest and status.
 - *Linked Data & Discovery* article covering the context, external authorities, IIIF, the PROV-O mapping, and catalogs.
+- **Package signatures.** `manifest.signatures` holds Ed25519 signatures over the package digest, with domain-separated messages. `ols keygen`, `ols sign`, `signPackage` / `sign_package`. Both SDKs produce byte-identical signatures. `ols pack` drops package signatures when the digest changes.
+- **Digest-bound approvals.** A new `approval` document type (`approval.schema.json`) binds an authority status to the canonical digests of the approved entities, and can be signed by the issuer (`signApproval` / `sign_approval`). Changed content reports `OLS_APPROVAL_STALE`. Entities claiming `parish-reviewed`, `diocesan-approved`, or `synodal-approved` without an approval in effect report `OLS_AUTHORITY_UNATTESTED` (warning).
+- **Keyrings.** `keyring.schema.json` describes the keys a consumer trusts, optionally limited to the statuses they may attest (`approves`). `--keyring` on `ols verify` (strict: `OLS_PACKAGE_UNSIGNED`, `OLS_APPROVAL_UNTRUSTED`) and on `ols validate`. Signature checks: `OLS_SIGNATURE_INVALID`, `OLS_SIGNATURE_UNTRUSTED`.
+- The Python package now depends on `cryptography` for Ed25519.
+- *Signatures & Approvals* article.
 - New *Sharing & Distribution* docs category with an *Integrity & Canonical Form* article.
 - `npm run schemas:provenance` recomputes schema provenance digests and syncs the Python schema copy.
 

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ols.otyg.org/schema/v1.0/keyring.schema.json",
+  "title": "OLS Keyring",
+  "description": "A consumer's list of trusted signing keys. Kept outside packages and passed to `ols verify --keyring`.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "const": "https://ols.otyg.org/schema/v1.0/keyring.schema.json"
+    },
+    "ols_version": {
+      "type": "string",
+      "pattern": "^1\\.[01]\\.[0-9]+$"
+    },
+    "type": {
+      "const": "keyring"
+    },
+    "keys": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^ed25519:[A-Za-z0-9_-]{43}$",
+            "description": "Ed25519 public key: ed25519: + base64url of the 32 raw bytes."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "approves": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/AuthorityStatus"
+            },
+            "description": "Approval statuses this key may attest. Omit to trust the key for any status."
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "ols_version",
+    "type",
+    "keys"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "AuthorityStatus": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "needs-review",
+        "educational-only",
+        "parish-reviewed",
+        "diocesan-approved",
+        "synodal-approved",
+        "historical-only",
+        "deprecated"
+      ],
+      "description": "Ecclesial review and permitted-use status."
+    }
+  },
+  "x-ols-schema-source": "normative",
+  "x-ols-specification": "https://ols.otyg.org/schema/v1.0/keyring.schema.json",
+  "x-ols-revision": "1.2.0"
+}

@@ -6,9 +6,12 @@ from openliturgy.integrity import canonical_digest, canonicalize
 from openliturgy.models import ValidationReport
 from openliturgy.references import resolve_reference
 from openliturgy.schemas import load_context
+from openliturgy.trust import approval_signature_message, generate_signing_key, verify_signature
 from openliturgy.validation import (
     lock_package,
     pack_package,
+    sign_approval,
+    sign_package,
     validate_document,
     validate_package,
     validate_translation_variants,
@@ -263,3 +266,72 @@ def test_load_context_matches_published_context() -> None:
     )
     assert load_context() == published
     assert load_context()["@context"]["id"] == "@id"
+
+
+def _keyring() -> dict:
+    return json.loads((FIXTURES / "keys/demo-keyring.json").read_text(encoding="utf-8"))
+
+
+def _report_codes(report: ValidationReport) -> list[str]:
+    return sorted(d.code for d in report.diagnostics)
+
+
+def test_signed_fixture_verifies_against_keyring() -> None:
+    assert verify_package(FIXTURES / "signed", _keyring()).valid
+    assert _report_codes(validate_package(FIXTURES / "signed", keyring=_keyring())) == ["OLS_SCHEMA_PROVISIONAL"]
+
+
+def test_changed_content_is_rejected_after_repacking() -> None:
+    assert _report_codes(verify_package(FIXTURES / "signed-tampered", _keyring())) == [
+        "OLS_APPROVAL_STALE", "OLS_AUTHORITY_UNATTESTED", "OLS_PACKAGE_UNSIGNED", "OLS_SIGNATURE_INVALID",
+    ]
+
+
+def test_untrusted_and_unauthorized_keys() -> None:
+    other = {"keys": [{"key": generate_signing_key()[1]}]}
+    assert _report_codes(verify_package(FIXTURES / "signed", other)) == [
+        "OLS_APPROVAL_UNTRUSTED", "OLS_AUTHORITY_UNATTESTED", "OLS_PACKAGE_UNSIGNED",
+        "OLS_SIGNATURE_UNTRUSTED", "OLS_SIGNATURE_UNTRUSTED",
+    ]
+    limited = _keyring()
+    limited["keys"][0]["approves"] = ["parish-reviewed"]
+    assert _report_codes(verify_package(FIXTURES / "signed", limited)) == [
+        "OLS_APPROVAL_UNTRUSTED", "OLS_AUTHORITY_UNATTESTED", "OLS_SIGNATURE_UNTRUSTED",
+    ]
+
+
+def test_sign_end_to_end(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "signed", package)
+    private_key_pem, public_key = generate_signing_key()
+    sign_approval(package / "approvals/diocesan-review.ols.json", private_key_pem)
+    pack_package(package)
+    sign_package(package, private_key_pem)
+    assert verify_package(package, {"keys": [{"key": public_key}]}).valid
+
+
+def test_refuses_to_sign_unpacked_package(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "complete-minimal", package)
+    try:
+        sign_package(package, generate_signing_key()[0])
+    except ValueError as error:
+        assert "ols pack" in str(error)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_signature_domains_are_separate() -> None:
+    manifest = json.loads((FIXTURES / "signed/manifest.ols.json").read_text(encoding="utf-8"))
+    approval = json.loads((FIXTURES / "signed/approvals/diocesan-review.ols.json").read_text(encoding="utf-8"))
+    assert not verify_signature(approval_signature_message(approval), manifest["signatures"][0])
+    assert verify_signature(approval_signature_message(approval), approval["signatures"][0])
+
+
+def test_pack_drops_signatures_only_when_digest_changes(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    shutil.copytree(FIXTURES / "signed", package)
+    assert len(pack_package(package)["signatures"]) == 1
+    corpus = package / "corpus.ols.json"
+    corpus.write_text(corpus.read_text(encoding="utf-8").replace("Lord, have mercy.", "Lord, have mercy!"), encoding="utf-8")
+    assert "signatures" not in pack_package(package)

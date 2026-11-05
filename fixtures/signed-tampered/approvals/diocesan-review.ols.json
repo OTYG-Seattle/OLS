@@ -1,0 +1,26 @@
+{
+  "$schema": "https://ols.otyg.org/schema/v1.0/approval.schema.json",
+  "ols_version": "1.1.0",
+  "type": "approval",
+  "id": "approval-demo-diocese-kyrie",
+  "status": "diocesan-approved",
+  "issuer": "org-demo-diocese",
+  "issued": "2026-11-01",
+  "allowedUse": [
+    "education",
+    "altar-use"
+  ],
+  "subjects": [
+    {
+      "entity": "block-kyrie",
+      "digest": "sha256:5d6c0a949640506501864c159e02ef811bca7471ed75802c620cf0d1c3a6156a"
+    }
+  ],
+  "signatures": [
+    {
+      "key": "ed25519:JJ_a3SxMi_btlclVusnTQj_FUo7WKXcIPPC8LCB3mO0",
+      "signature": "RxJ6zA-SihYU_jgTWWlbrfucUdMFYK80g4DNa9xWjBV62X0QQuENf1OoIRR2H2I1nGUdVN5r1Yu3mOJ4ca7tBA",
+      "signer": "org-demo-diocese"
+    }
+  ]
+}
